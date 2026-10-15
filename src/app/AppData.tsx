@@ -7,6 +7,10 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { openWorkCoreDB } from '../data/db';
 import { computeDashboard, type DashboardStats } from '../domain/analytics';
 import { computeHelpdeskStats, type HelpdeskStats } from '../domain/helpdesk/analytics';
+import { computeAllStock, type StockStatus } from '../domain/inventory/stock';
+import { computeInventoryStats, type InventoryStats } from '../domain/inventory/analytics';
+import { INVENTORY_AUTOMATIONS } from '../automation/inventoryAutomations';
+import { pendingProposals, type AutomationProposal } from '../automation/engine';
 import type { DataSnapshot, Department, Employee } from '../domain/types';
 import { AppError, WorkCoreService } from '../services/workcoreService';
 import { useToast } from '../ui/Toast';
@@ -16,6 +20,11 @@ interface AppDataValue {
   data: DataSnapshot;
   stats: DashboardStats;
   helpdeskStats: HelpdeskStats;
+  /** 品目ごとの在庫状態 (実在庫・予約・利用可能・発注残・見込み) */
+  stock: Map<string, StockStatus>;
+  inventoryStats: InventoryStats;
+  /** 承認待ちの自動化提案 */
+  proposals: AutomationProposal[];
   today: string;
   deptById: Map<string, Department>;
   empById: Map<string, Employee>;
@@ -124,11 +133,15 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AppDataValue | null>(() => {
     if (state.status !== 'ready') return null;
     const today = state.service.today();
+    const stock = computeAllStock(state.data.items, state.data);
     return {
       service: state.service,
       data: state.data,
       stats: computeDashboard(state.data, today),
       helpdeskStats: computeHelpdeskStats(state.data.inquiries, state.data.inquiryCategories, today),
+      stock,
+      inventoryStats: computeInventoryStats(state.data, today),
+      proposals: pendingProposals(INVENTORY_AUTOMATIONS, { data: state.data, today, stock }),
       today,
       deptById: new Map(state.data.departments.map((d) => [d.id, d])),
       empById: new Map(state.data.employees.map((e) => [e.id, e])),

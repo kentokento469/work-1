@@ -159,6 +159,7 @@ export function TasksPage({ query }: { query: URLSearchParams }) {
                 { value: 'manual', label: '手動作成' },
                 { value: 'onboarding', label: '入社準備' },
                 { value: 'inquiry', label: '問い合わせ' },
+                { value: 'automation', label: '自動化（機器）' },
               ]}
             />
             <FilterSelect

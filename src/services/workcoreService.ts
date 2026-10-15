@@ -10,7 +10,9 @@ import { generateId, nowISO } from '../domain/id';
 import { normalizeEmployeeNumber, validateEmployee, validateRule, validateTask, type EmployeeInput, type RuleInput, type TaskInput } from '../domain/validation';
 import { TASK_STATUS_LABEL, type DataSnapshot, type Department, type Employee, type OnboardingRule, type Task, type TaskStatus } from '../domain/types';
 import type { BackupFile } from '../data/backup';
-import { STORE_NAMES, type WorkCoreDB } from '../data/db';
+import { DATA_STORES, STORE_NAMES, type WorkCoreDB } from '../data/db';
+import { emptyInventory } from '../domain/inventory/defaults';
+import { InventoryService } from './inventoryService';
 import { createDemoData, createHelpdeskDemoData } from '../demo/demoData';
 import { createDefaultInquiryCategories } from '../domain/helpdesk/defaults';
 import { AppError, abortWith, appendInquiryEvent, fieldError, inquiryEvent, logActivity, type WriteTx } from './common';
@@ -26,9 +28,11 @@ export interface DeletedEmployee {
 
 export class WorkCoreService {
   readonly helpdesk: HelpdeskService;
+  readonly inventory: InventoryService;
 
   constructor(private readonly db: WorkCoreDB, private readonly clock: () => string = todayISO) {
     this.helpdesk = new HelpdeskService(db, clock);
+    this.inventory = new InventoryService(db, clock);
   }
 
   today(): string {
@@ -38,24 +42,23 @@ export class WorkCoreService {
   // ---------- 読み込み ----------
 
   async loadSnapshot(): Promise<DataSnapshot> {
-    const stores = ['departments', 'employees', 'tasks', 'rules', 'activities', 'inquiries', 'faqs', 'inquiryCategories'] as const;
-    const tx = this.db.transaction([...stores], 'readonly');
-    const [departments, employees, tasks, rules, activities, inquiries, faqs, inquiryCategories] = await Promise.all([
-      tx.objectStore('departments').getAll(),
-      tx.objectStore('employees').getAll(),
-      tx.objectStore('tasks').getAll(),
-      tx.objectStore('rules').getAll(),
-      tx.objectStore('activities').getAll(),
-      tx.objectStore('inquiries').getAll(),
-      tx.objectStore('faqs').getAll(),
-      tx.objectStore('inquiryCategories').getAll(),
-    ]);
+    const tx = this.db.transaction([...DATA_STORES], 'readonly');
+    const entries = await Promise.all(DATA_STORES.map(async (name) => [name, await tx.objectStore(name).getAll()] as const));
     await tx.done;
-    departments.sort((a, b) => a.order - b.order);
-    activities.sort((a, b) => b.at.localeCompare(a.at));
-    inquiryCategories.sort((a, b) => a.order - b.order);
-    inquiries.sort((a, b) => b.receivedAt.localeCompare(a.receivedAt));
-    return { departments, employees, tasks, rules, activities, inquiries, faqs, inquiryCategories };
+    const data = Object.fromEntries(entries) as unknown as DataSnapshot;
+    data.departments.sort((a, b) => a.order - b.order);
+    data.activities.sort((a, b) => b.at.localeCompare(a.at));
+    data.inquiryCategories.sort((a, b) => a.order - b.order);
+    data.inquiries.sort((a, b) => b.receivedAt.localeCompare(a.receivedAt));
+    data.items.sort((a, b) => a.code.localeCompare(b.code));
+    data.assets.sort((a, b) => a.assetNumber.localeCompare(b.assetNumber));
+    data.stockMovements.sort((a, b) => b.at.localeCompare(a.at));
+    data.assetEvents.sort((a, b) => b.at.localeCompare(a.at));
+    data.purchaseOrders.sort((a, b) => b.number.localeCompare(a.number));
+    data.locations.sort((a, b) => a.order - b.order);
+    data.equipmentRules.sort((a, b) => a.order - b.order);
+    data.automationRuns.sort((a, b) => b.at.localeCompare(a.at));
+    return data;
   }
 
   /** 初回起動時のみデモデータを投入する */
@@ -123,9 +126,15 @@ export class WorkCoreService {
    * 戻り値は Undo 用。
    */
   async deleteEmployee(id: string): Promise<DeletedEmployee> {
-    const tx = this.db.transaction(['employees', 'tasks', 'activities'], 'readwrite');
+    const tx = this.db.transaction(['employees', 'tasks', 'activities', 'assets', 'reservations'], 'readwrite');
     const employee = await tx.objectStore('employees').get(id);
     if (!employee) return abortWith(tx, '対象の社員が見つかりません');
+    // 貸与中・予約中の機器がある社員を削除すると、資産の利用者が不明になるため拒否する
+    const [assets, reservations] = await Promise.all([tx.objectStore('assets').index('byAssignee').getAll(id), tx.objectStore('reservations').index('byEmployee').getAll(id)]);
+    const holding = assets.filter((a) => a.status === 'in_use' || a.status === 'reserved').length;
+    const reserving = reservations.filter((r) => r.status === 'active' || r.status === 'backorder').length;
+    if (holding + reserving > 0)
+      return abortWith(tx, `貸与中・予約中の機器があるため削除できません（資産${holding}台・予約${reserving}件）。返却または予約解除をしてから削除するか、ステータスを「退職」にしてください`);
     const tasks = await tx.objectStore('tasks').index('byEmployee').getAll(id);
     for (const t of tasks) await tx.objectStore('tasks').delete(t.id);
     await tx.objectStore('employees').delete(id);
@@ -406,14 +415,10 @@ export class WorkCoreService {
     const tx = this.db.transaction([...STORE_NAMES], 'readwrite');
     // 二重送信防止キー (meta の req:*) も含めて全消去する
     await Promise.all(STORE_NAMES.map((s) => tx.objectStore(s).clear()));
-    for (const d of data.departments) await tx.objectStore('departments').put(d);
-    for (const e of data.employees) await tx.objectStore('employees').put(e);
-    for (const t of data.tasks) await tx.objectStore('tasks').put(t);
-    for (const r of data.rules) await tx.objectStore('rules').put(r);
-    for (const a of data.activities) await tx.objectStore('activities').put(a);
-    for (const c of data.inquiryCategories) await tx.objectStore('inquiryCategories').put(c);
-    for (const i of data.inquiries) await tx.objectStore('inquiries').put(i);
-    for (const f of data.faqs) await tx.objectStore('faqs').put(f);
+    for (const name of DATA_STORES) {
+      const store = tx.objectStore(name);
+      for (const rec of data[name] as { id: string }[]) await store.put(rec as never);
+    }
     await tx.objectStore('meta').put({ key: 'initialized', value: nowISO() });
     await logActivity(tx, 'data', 'replace', message);
     await tx.done;
@@ -431,8 +436,18 @@ export class WorkCoreService {
   async clearBusinessData(): Promise<void> {
     const demo = createDemoData(this.today());
     await this.replaceAll(
-      { departments: demo.departments, rules: demo.rules, employees: [], tasks: [], activities: [], inquiries: [], faqs: [], inquiryCategories: createDefaultInquiryCategories() },
-      '社員・タスク・問い合わせを全削除しました（部署・ルール・カテゴリは初期設定）',
+      {
+        ...emptyInventory(true),
+        departments: demo.departments,
+        rules: demo.rules,
+        employees: [],
+        tasks: [],
+        activities: [],
+        inquiries: [],
+        faqs: [],
+        inquiryCategories: createDefaultInquiryCategories(),
+      },
+      '社員・タスク・問い合わせ・在庫を全削除しました（部署・ルール・カテゴリ・保管場所・仕入先は初期設定）',
     );
   }
 

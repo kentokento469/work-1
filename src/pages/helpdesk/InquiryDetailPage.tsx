@@ -37,6 +37,7 @@ import { FaqFormModal } from '../../features/helpdesk/FaqFormModal';
 import { InquiryFormFields, type InquiryFormState } from '../../features/helpdesk/InquiryForm';
 import { CategoryBadge, InquiryStatusBadge, SecretWarning, SolutionSuggestions } from '../../features/helpdesk/parts';
 import { TaskFormModal } from '../../features/TaskFormModal';
+import { InquiryEquipmentCard } from '../../features/inventory/RelatedEquipment';
 import { TaskItem } from '../../features/TaskItem';
 import { PriorityBadge } from '../../ui/badges';
 import { Modal, ModalCancelButton } from '../../ui/Modal';
@@ -276,6 +277,9 @@ export function InquiryDetailPage({ inquiryId, query }: { inquiryId: string; que
         {/* 解決策 */}
         <SolutionsCard inquiry={inquiry} />
       </div>
+
+      {/* 関連機器 (在庫・資産との連携) */}
+      <InquiryEquipmentCard inquiryId={inquiry.id} requesterId={inquiry.requesterId} />
 
       {/* 解決内容 */}
       <ResolutionCard inquiry={inquiry} onFaq={() => setFaqOpen(true)} />

@@ -1,9 +1,9 @@
 import { useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Database, Download, FileJson, FileSpreadsheet, Headset, History, RefreshCcw, ShieldCheck, Trash2, Upload } from 'lucide-react';
+import { AlertTriangle, Boxes, Database, Download, FileJson, FileSpreadsheet, Headset, History, RefreshCcw, ShieldCheck, Trash2, Upload } from 'lucide-react';
 import { useAppData } from '../app/AppData';
 import { downloadText, timestampForFile } from '../app/download';
 import { createBackup, parseBackupText, type BackupFile } from '../data/backup';
-import { employeesToCsv, inquiriesToCsv, tasksToCsv } from '../data/csv';
+import { assetsToCsv, employeesToCsv, inquiriesToCsv, itemsToCsv, movementsToCsv, tasksToCsv } from '../data/csv';
 import { DemoNotice } from '../app/Layout';
 import { formatDateTimeJa } from '../domain/date';
 import type { ActivityCategory, DataSnapshot } from '../domain/types';
@@ -33,6 +33,18 @@ const COUNT_LABEL: Record<keyof DataSnapshot, string> = {
   inquiries: '問い合わせ',
   faqs: 'FAQ',
   inquiryCategories: '問い合わせカテゴリ',
+  items: '品目',
+  stockLevels: '保管場所別在庫',
+  stockMovements: '入出庫履歴',
+  reservations: '予約',
+  assets: 'IT資産',
+  assetEvents: '資産履歴',
+  locations: '保管場所',
+  suppliers: '仕入先',
+  purchaseSuggestions: '発注候補',
+  purchaseOrders: '発注書',
+  equipmentRules: '必要機器ルール',
+  automationRuns: '自動化の処理履歴',
 };
 
 export function DataPage() {
@@ -46,9 +58,12 @@ export function DataPage() {
   const [category, setCategory] = useState('');
   const [logLimit, setLogLimit] = useState(30);
 
-  const exportFile = async (kind: 'employees' | 'tasks' | 'inquiries' | 'json') => {
+  const exportFile = async (kind: 'employees' | 'tasks' | 'inquiries' | 'items' | 'movements' | 'assets' | 'json') => {
     const ts = timestampForFile();
-    if (kind === 'inquiries') downloadText(`workcore_inquiries_${ts}.csv`, inquiriesToCsv(data), 'text/csv;charset=utf-8');
+    if (kind === 'items') downloadText(`workcore_inventory_${ts}.csv`, itemsToCsv(data), 'text/csv;charset=utf-8');
+    else if (kind === 'movements') downloadText(`workcore_stock_movements_${ts}.csv`, movementsToCsv(data), 'text/csv;charset=utf-8');
+    else if (kind === 'assets') downloadText(`workcore_assets_${ts}.csv`, assetsToCsv(data), 'text/csv;charset=utf-8');
+    else if (kind === 'inquiries') downloadText(`workcore_inquiries_${ts}.csv`, inquiriesToCsv(data), 'text/csv;charset=utf-8');
     else if (kind === 'employees') downloadText(`workcore_employees_${ts}.csv`, employeesToCsv(data), 'text/csv;charset=utf-8');
     else if (kind === 'tasks') downloadText(`workcore_tasks_${ts}.csv`, tasksToCsv(data), 'text/csv;charset=utf-8');
     else downloadText(`workcore_backup_${ts}.json`, JSON.stringify(createBackup(data), null, 2), 'application/json');
@@ -59,7 +74,13 @@ export function DataPage() {
           ? `タスク一覧CSV（${data.tasks.length}件）`
           : kind === 'inquiries'
             ? `問い合わせ一覧CSV（${data.inquiries.length}件）`
-            : 'JSONバックアップ';
+            : kind === 'items'
+              ? `在庫一覧CSV（${data.items.length}品目）`
+              : kind === 'movements'
+                ? `入出庫履歴CSV（${data.stockMovements.length}件）`
+                : kind === 'assets'
+                  ? `資産台帳CSV（${data.assets.length}台）`
+                  : 'JSONバックアップ';
     await run((s) => s.recordExport(`${label}を出力しました`), `${label}を出力しました`).catch(() => undefined);
   };
 
@@ -109,6 +130,15 @@ export function DataPage() {
             </Button>
             <Button variant="secondary" icon={FileSpreadsheet} onClick={() => exportFile('inquiries')} className="justify-start" data-testid="export-inquiries">
               問い合わせ一覧をCSV出力（{data.inquiries.length}件）
+            </Button>
+            <Button variant="secondary" icon={FileSpreadsheet} onClick={() => exportFile('items')} className="justify-start" data-testid="export-items">
+              在庫一覧をCSV出力（{data.items.length}品目）
+            </Button>
+            <Button variant="secondary" icon={FileSpreadsheet} onClick={() => exportFile('movements')} className="justify-start" data-testid="export-movements">
+              入出庫履歴をCSV出力（{data.stockMovements.length}件）
+            </Button>
+            <Button variant="secondary" icon={FileSpreadsheet} onClick={() => exportFile('assets')} className="justify-start" data-testid="export-assets">
+              資産台帳をCSV出力（{data.assets.length}台）
             </Button>
             <Button variant="secondary" icon={FileJson} onClick={() => exportFile('json')} className="justify-start" data-testid="export-json">
               全データをJSONバックアップ
@@ -166,11 +196,22 @@ export function DataPage() {
                 ヘルプデスクのデモデータだけ追加（既存データは残す）
               </Button>
             )}
+            {data.items.length === 0 && (
+              <Button
+                variant="secondary"
+                icon={Boxes}
+                className="justify-start"
+                data-testid="add-inventory-demo"
+                onClick={() => run((s) => s.inventory.addInventoryDemo(), (n) => `在庫・資産のデモデータ（品目${n}件）を追加しました`).catch(() => undefined)}
+              >
+                在庫・資産のデモデータだけ追加（既存データは残す）
+              </Button>
+            )}
             <Button variant="secondary" icon={RefreshCcw} onClick={() => setConfirmReset(true)} className="justify-start" data-testid="reset-demo">
               デモデータを初期化・再生成
             </Button>
             <Button variant="secondary" icon={Trash2} onClick={() => setConfirmClear(true)} className="justify-start text-red-600 dark:text-red-400">
-              社員・タスク・問い合わせを全削除（空の状態で開始）
+              社員・タスク・問い合わせ・在庫を全削除（空の状態で開始）
             </Button>
             <p className="text-xs text-slate-500 dark:text-slate-400">デモデータの日付は「今日」を基準に生成されるため、いつでも入社予定・期限超過などの状態を確認できます。</p>
           </div>
@@ -258,7 +299,7 @@ export function DataPage() {
         danger
         title="デモデータを初期化しますか？"
         confirmLabel="初期化する"
-        message="現在のデータ（社員・タスク・問い合わせ・FAQ・ルール・部署・操作履歴）をすべて削除し、デモデータを再生成します。"
+        message="現在のデータ（社員・タスク・問い合わせ・FAQ・在庫・資産・発注・ルール・部署・操作履歴）をすべて削除し、デモデータを再生成します。"
         onConfirm={() => run((s) => s.resetDemoData(), 'デモデータを初期化しました')}
         onClose={() => setConfirmReset(false)}
       />
@@ -267,7 +308,7 @@ export function DataPage() {
         danger
         title="社員・タスクを全削除しますか？"
         confirmLabel="全削除する"
-        message="社員・タスク・問い合わせ・FAQ・操作履歴をすべて削除します。部署・準備ルール・問い合わせカテゴリは初期設定に戻ります。この操作は取り消せません。"
+        message="社員・タスク・問い合わせ・FAQ・在庫・資産・発注・操作履歴をすべて削除します。部署・準備ルール・問い合わせカテゴリ・保管場所・仕入先は初期設定に戻ります。この操作は取り消せません。"
         onConfirm={() => run((s) => s.clearBusinessData(), '社員・タスクを全削除しました')}
         onClose={() => setConfirmClear(false)}
       />

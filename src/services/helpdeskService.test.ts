@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { openDB } from 'idb';
 import { createService, TODAY } from '../test/helpers';
-import { openWorkCoreDB } from '../data/db';
+import { DB_VERSION, openWorkCoreDB } from '../data/db';
 import { generateId } from '../domain/id';
 import { createBackup, parseBackupText } from '../data/backup';
 import { CAT } from '../domain/helpdesk/defaults';
@@ -177,7 +177,7 @@ describe('DBマイグレーション（v1 → v2）', () => {
     v1.close();
 
     const v2 = await openWorkCoreDB(name);
-    expect(v2.version).toBe(2);
+    expect(v2.version).toBe(DB_VERSION);
     const service = new WorkCoreService(v2, () => TODAY);
     expect(await service.ensureInitialized()).toBe(false); // 既存データは消さない
     const snap = await service.loadSnapshot();

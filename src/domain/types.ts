@@ -1,3 +1,18 @@
+import type {
+  Asset,
+  AssetEvent,
+  AutomationRun,
+  EquipmentRule,
+  Item,
+  Location,
+  PurchaseOrder,
+  PurchaseSuggestion,
+  Reservation,
+  StockLevel,
+  StockMovement,
+  Supplier,
+} from './inventory/types';
+
 /**
  * WorkCore ドメインモデル定義。
  * UI・永続化層の双方から参照される唯一の型定義ソース。
@@ -61,7 +76,7 @@ export const PRIORITY_LABEL: Record<Priority, string> = {
 
 export const PRIORITY_WEIGHT: Record<Priority, number> = { high: 3, medium: 2, low: 1 };
 
-export type TaskSource = 'manual' | 'onboarding' | 'inquiry';
+export type TaskSource = 'manual' | 'onboarding' | 'inquiry' | 'automation';
 
 export interface Task {
   id: string;
@@ -79,6 +94,8 @@ export interface Task {
   ruleId: string | null;
   /** 生成元の問い合わせ (Phase 2)。Phase 1 のデータはマイグレーションで null になる */
   inquiryId: string | null;
+  /** 関連するIT資産 (Phase 3)。それ以前のデータには存在しない */
+  assetId?: string | null;
   createdAt: ISODateTime;
   updatedAt: ISODateTime;
   completedAt: ISODateTime | null;
@@ -106,7 +123,20 @@ export interface OnboardingRule {
   updatedAt: ISODateTime;
 }
 
-export type ActivityCategory = 'employee' | 'task' | 'onboarding' | 'rule' | 'department' | 'data' | 'inquiry' | 'faq' | 'category';
+export type ActivityCategory =
+  | 'employee'
+  | 'task'
+  | 'onboarding'
+  | 'rule'
+  | 'department'
+  | 'data'
+  | 'inquiry'
+  | 'faq'
+  | 'category'
+  | 'inventory'
+  | 'asset'
+  | 'purchase'
+  | 'automation';
 
 export interface ActivityLog {
   id: string;
@@ -221,4 +251,17 @@ export interface DataSnapshot {
   inquiries: Inquiry[];
   faqs: Faq[];
   inquiryCategories: InquiryCategory[];
+  // Phase 3: 在庫・IT資産・購買
+  items: Item[];
+  stockLevels: StockLevel[];
+  stockMovements: StockMovement[];
+  reservations: Reservation[];
+  assets: Asset[];
+  assetEvents: AssetEvent[];
+  locations: Location[];
+  suppliers: Supplier[];
+  purchaseSuggestions: PurchaseSuggestion[];
+  purchaseOrders: PurchaseOrder[];
+  equipmentRules: EquipmentRule[];
+  automationRuns: AutomationRun[];
 }

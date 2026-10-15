@@ -172,7 +172,13 @@ test('[Phase1] ナビゲーション・テーマ切替・入力エラー表示',
   expect(await page.evaluate(() => document.documentElement.classList.contains('dark'))).not.toBe(isDark);
 
   // 必須項目未入力で登録 → フィールドエラー
-  await nav.getByRole('link', { name: isMobile ? '社員' : '社員管理' }).click();
+  if (isMobile) {
+    // Phase 3 から下部ナビは「在庫」を優先し、社員管理は「メニュー」内
+    await nav.getByRole('link', { name: 'メニュー' }).click();
+    await page.getByRole('link', { name: /社員管理/ }).click();
+  } else {
+    await nav.getByRole('link', { name: '社員管理' }).click();
+  }
   await page.getByRole('button', { name: '新規登録' }).click();
   await page.getByRole('button', { name: '登録する' }).click();
   await expect(page.getByText('氏名を入力してください')).toBeVisible();

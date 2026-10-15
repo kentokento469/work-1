@@ -19,6 +19,9 @@ const loaders = {
   inquiryDetail: () => import('../pages/helpdesk/InquiryDetailPage'),
   faq: () => import('../pages/helpdesk/FaqPages'),
   settings: () => import('../pages/settings/SettingsPage'),
+  inventory: () => import('../pages/inventory/InventoryPage'),
+  inventoryDetail: () => import('../pages/inventory/DetailPages'),
+  automation: () => import('../pages/AutomationPage'),
 };
 
 // 使用頻度の低い画面・ヘルプデスクは初回表示を軽くするため遅延読み込みする
@@ -30,6 +33,12 @@ const InquiryDetailPage = lazy(() => loaders.inquiryDetail().then((m) => ({ defa
 const FaqListPage = lazy(() => loaders.faq().then((m) => ({ default: m.FaqListPage })));
 const FaqDetailPage = lazy(() => loaders.faq().then((m) => ({ default: m.FaqDetailPage })));
 const SettingsPage = lazy(() => loaders.settings().then((m) => ({ default: m.SettingsPage })));
+const InventoryPage = lazy(() => loaders.inventory().then((m) => ({ default: m.InventoryPage })));
+const ItemDetailPage = lazy(() => loaders.inventoryDetail().then((m) => ({ default: m.ItemDetailPage })));
+const AssetDetailPage = lazy(() => loaders.inventoryDetail().then((m) => ({ default: m.AssetDetailPage })));
+const OrderDetailPage = lazy(() => loaders.inventoryDetail().then((m) => ({ default: m.OrderDetailPage })));
+const StocktakePage = lazy(() => loaders.inventoryDetail().then((m) => ({ default: m.StocktakePage })));
+const AutomationPage = lazy(() => loaders.automation().then((m) => ({ default: m.AutomationPage })));
 
 /** 初回表示の後、残りの画面を先読みして画面遷移時の読み込み待ち (ちらつき) をなくす */
 function usePrefetchPages() {
@@ -42,7 +51,7 @@ function usePrefetchPages() {
 function Routes() {
   const route = useRoute();
   usePrefetchPages();
-  const [first, second] = route.segments;
+  const [first, second, third] = route.segments;
 
   let active = first ?? 'dashboard';
   let page;
@@ -73,6 +82,23 @@ function Routes() {
       break;
     case 'menu':
       page = <MenuPage />;
+      break;
+    case 'inventory':
+      page =
+        second === 'items' && third ? (
+          <ItemDetailPage itemId={third} />
+        ) : second === 'assets' && third ? (
+          <AssetDetailPage assetId={third} />
+        ) : second === 'orders' && third ? (
+          <OrderDetailPage orderId={third} />
+        ) : second === 'stocktake' ? (
+          <StocktakePage />
+        ) : (
+          <InventoryPage />
+        );
+      break;
+    case 'automation':
+      page = <AutomationPage />;
       break;
     default:
       active = 'dashboard';

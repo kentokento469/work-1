@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ArrowLeft, ClipboardList, Headset, Pencil, Plus, Trash2, UserX, Zap } from 'lucide-react';
 import { InquiryStatusBadge } from '../features/helpdesk/parts';
+import { EmployeeEquipmentCard } from '../features/inventory/RelatedEquipment';
 import { useAppData } from '../app/AppData';
 import { navigate } from '../app/router';
 import { daysUntilHire } from '../automation/onboardingEngine';
@@ -131,6 +132,8 @@ export function EmployeeDetailPage({ employeeId }: { employeeId: string }) {
           )}
         </div>
       </Card>
+
+      <EmployeeEquipmentCard employeeId={emp.id} />
 
       <Card className="mt-4 overflow-hidden">
         <CardHeader

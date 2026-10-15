@@ -3,6 +3,7 @@ import {
   Activity,
   AlertTriangle,
   BarChart3,
+  Boxes,
   CalendarClock,
   ChevronRight,
   CircleCheckBig,
@@ -11,6 +12,7 @@ import {
   Headset,
   ListTodo,
   PieChart,
+  Sparkles,
   UserPlus,
   Users,
   type LucideIcon,
@@ -99,6 +101,10 @@ const CATEGORY_LABEL: Record<ActivityCategory, string> = {
   inquiry: '問い合わせ',
   faq: 'FAQ',
   category: 'カテゴリ',
+  inventory: '在庫',
+  asset: '資産',
+  purchase: '購買',
+  automation: '自動化',
 };
 
 export function DashboardPage() {
@@ -137,6 +143,7 @@ export function DashboardPage() {
       </div>
 
       <HelpdeskSummary />
+      <InventorySummary />
 
       <div className="mt-4 grid gap-4 lg:grid-cols-5">
         <Card className="lg:col-span-3">
@@ -327,6 +334,62 @@ function HelpdeskSummary() {
             <p className={cx('mt-0.5 text-xl font-bold tabular-nums text-slate-900 dark:text-white', k.tone)}>
               {k.value}
               {k.unit && <span className="ml-0.5 text-xs font-normal text-slate-400">{k.unit}</span>}
+            </p>
+          </a>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+/** 在庫・資産・購買と自動化提案の要約。数字はそれぞれ絞り込み済みの一覧へ直接つながる */
+function InventorySummary() {
+  const { inventoryStats: st, proposals } = useAppData();
+  const items = [
+    { label: '在庫不足', value: st.shortageItems, href: '#/inventory?tab=stock&state=shortage', tone: st.shortageItems > 0 ? 'text-amber-700 dark:text-amber-400' : '' },
+    { label: '発注候補', value: st.openSuggestions, href: '#/inventory?tab=orders', tone: '' },
+    { label: '承認待ち', value: st.pendingApproval, href: '#/inventory?tab=orders&pstatus=pending_approval', tone: '' },
+    { label: '入荷待ち', value: st.awaitingReceipt, href: '#/inventory?tab=orders&pstatus=open', tone: '' },
+    { label: '貸与中の機器', value: st.assetsInUse, href: '#/inventory?tab=assets&astatus=in_use', tone: '' },
+  ];
+  return (
+    <Card className="mt-4">
+      <CardHeader
+        title="在庫・資産・購買"
+        icon={Boxes}
+        description={`在庫 ${st.totalOnHand}点（引当可能 ${st.totalAvailable}点）`}
+        action={
+          <a href="#/inventory?tab=analytics" className="py-1 text-xs font-semibold text-navy-600 dark:text-navy-300">
+            分析を見る
+          </a>
+        }
+      />
+      {proposals.length > 0 && (
+        <a
+          href="#/automation"
+          data-testid="dash-proposals"
+          className="mx-3 mt-1 flex min-h-12 items-center gap-3 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-900 sm:mx-4 dark:border-violet-900 dark:bg-violet-950/40 dark:text-violet-100"
+        >
+          <Sparkles className="size-5 shrink-0" aria-hidden />
+          <span className="min-w-0 flex-1">
+            <span className="font-semibold">承認待ちの自動化提案 {proposals.length}件</span>
+            <span className="block truncate text-xs opacity-80">{proposals.slice(0, 2).map((p) => p.title).join('／')}</span>
+          </span>
+          <ChevronRight className="size-4 shrink-0" aria-hidden />
+        </a>
+      )}
+      <div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-5 sm:p-4" data-testid="inventory-summary">
+        {items.map((k, i) => (
+          <a
+            key={k.label}
+            href={k.href}
+            className={cx('rounded-xl bg-slate-50 px-3 py-2.5 transition-colors hover:bg-slate-100 dark:bg-navy-950 dark:hover:bg-navy-800', i === 4 && 'col-span-2 sm:col-span-1')}
+            data-testid={`inv-dash-${k.label}`}
+          >
+            <p className="text-[11px] font-semibold text-slate-500">{k.label}</p>
+            <p className={cx('mt-0.5 text-xl font-bold tabular-nums text-slate-900 dark:text-white', k.tone)}>
+              {k.value}
+              <span className="ml-0.5 text-xs font-normal text-slate-400">{i === 4 ? '台' : '件'}</span>
             </p>
           </a>
         ))}

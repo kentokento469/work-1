@@ -2,7 +2,7 @@
  * 実ブラウザでのDBマイグレーション検証 (Phase 1 版で作ったデータを Phase 2 版で開く)。
  *
  * 実行方法 (同一オリジンに旧版・新版を配置する必要があるため通常のテストでは skip):
- *   1. Phase 1 (main) を <site>/p1/ に、Phase 2 を <site>/p2/ にビルド
+ *   1. Phase 1 を <site>/p1/、Phase 2 を <site>/p2/、Phase 3 を <site>/p3/ にビルド (vite build --outDir)
  *   2. <site> を静的配信 (例: python3 -m http.server 4180 -d <site>)
  *   3. MIGRATION_SITE_URL=http://localhost:4180 npx playwright test e2e/migration.spec.ts --project=iphone
  */
@@ -59,4 +59,49 @@ test('[Migration] Phase 1 のデータを保持したまま Phase 2 に移行で
   await expect(page.getByTestId('employee-count')).toHaveText('1名を表示');
   await page.goto(`${SITE}/p2/#/helpdesk?status=all`);
   await expect(page.getByTestId('inquiry-list').locator('li').first()).toBeVisible();
+});
+
+test('[Migration] Phase 2 のデータ（社員・問い合わせ）を保持したまま Phase 3 に移行できる', async ({ page, isMobile }) => {
+  test.skip(!SITE, 'MIGRATION_SITE_URL が未設定のため skip');
+  const counts = () =>
+    page.evaluate(async () => {
+      const db = await new Promise<IDBDatabase>((r) => {
+        const q = indexedDB.open('workcore');
+        q.onsuccess = () => r(q.result);
+      });
+      const has = (s: string) => db.objectStoreNames.contains(s);
+      const count = (s: string) => (has(s) ? new Promise<number>((r) => { const c = db.transaction(s).objectStore(s).count(); c.onsuccess = () => r(c.result); }) : Promise.resolve(-1));
+      const v = { version: db.version, employees: await count('employees'), tasks: await count('tasks'), inquiries: await count('inquiries'), faqs: await count('faqs'), items: await count('items'), locations: await count('locations'), suppliers: await count('suppliers') };
+      db.close();
+      return v;
+    });
+
+  // Phase 2 版: デモデータの上に問い合わせを1件追加
+  await page.goto(`${SITE}/p2/#/helpdesk/new`);
+  await page.getByLabel('申請者').selectOption({ label: '渡辺 さくら（A0033）' });
+  await page.getByLabel('件名').fill('移行確認用：プリンターが印刷できない');
+  await expect(page.getByLabel('カテゴリ')).not.toHaveValue('');
+  await page.getByTestId(isMobile ? 'submit-inquiry-mobile' : 'submit-inquiry').click();
+  await expect(page.getByTestId('inquiry-number')).toBeVisible();
+  const p2 = await counts();
+  expect(p2.version).toBe(2);
+  expect(p2.items).toBe(-1);
+
+  // Phase 3 版で開く → v3 へ自動移行。既存データは件数が変わらず、在庫は空（マスタのみ）
+  await page.goto(`${SITE}/p3/#/helpdesk?status=all&q=移行確認用`);
+  await expect(page.getByTestId('inquiry-list')).toContainText('移行確認用：プリンターが印刷できない');
+  const p3 = await counts();
+  expect(p3).toMatchObject({ version: 3, employees: p2.employees, tasks: p2.tasks, inquiries: p2.inquiries, faqs: p2.faqs, items: 0 });
+  expect(p3.locations).toBeGreaterThan(0);
+  expect(p3.suppliers).toBeGreaterThan(0);
+
+  // 既存データを残したまま在庫のデモを追加
+  await page.goto(`${SITE}/p3/#/data`);
+  await page.getByTestId('add-inventory-demo').click();
+  await expect(page.getByText(/在庫.*追加しました/).first()).toBeVisible();
+  const after = await counts();
+  expect(after).toMatchObject({ employees: p2.employees, inquiries: p2.inquiries });
+  expect(after.items).toBeGreaterThan(0);
+  await page.goto(`${SITE}/p3/#/inventory`);
+  await expect(page.getByTestId('item-list')).toBeVisible();
 });

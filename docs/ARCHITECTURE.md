@@ -1,4 +1,6 @@
-# WorkCore システム構成（Phase 2 時点）
+# WorkCore システム構成（Phase 3 時点）
+
+Phase 3 で追加した在庫・資産・購買と自動化エンジンは [§9 以降](#9-phase-3在庫資産購買のデータモデル) を参照。§1〜8 は Phase 2 までの構成で、Phase 3 でも変わっていない。
 
 ## 1. レイヤー構成
 
@@ -13,6 +15,7 @@
 │                │                                                                     │
 │ サービス層  services/workcoreService.ts  社員・タスク・入社準備・部署・データ管理            │
 │             services/helpdeskService.ts  問い合わせ・FAQ・カテゴリ                        │
+│             services/inventoryService.ts 在庫・資産・発注・自動化提案の実行（Phase 3）       │
 │             services/common.ts           AppError・操作履歴・トランザクション中断             │
 │                │ 検証 → 書き込み → 操作履歴 を 1 トランザクションで実行                       │
 │ ドメイン層  domain/types.ts              型定義（唯一の定義元）                             │
@@ -23,9 +26,11 @@
 │             domain/helpdesk/secrets      秘密情報の検出・伏せ字化                            │
 │             domain/helpdesk/analytics    ヘルプデスク分析                                  │
 │             domain/analytics, automation/onboardingEngine（Phase 1）                     │
+│             domain/inventory/  在庫計算・発注候補・在庫分析・初期マスタ（Phase 3）          │
+│             automation/engine, inventoryAutomations  自動化の判定（Phase 3、UI非依存）     │
 │                │                                                                     │
-│ 永続化層    data/db.ts      IndexedDB スキーマ v2・マイグレーション                         │
-│             data/backup.ts  JSON バックアップ（v1/v2 互換）・検証                           │
+│ 永続化層    data/db.ts      IndexedDB スキーマ v3・マイグレーション                         │
+│             data/backup.ts  JSON バックアップ（v1/v2/v3 互換）・検証                        │
 │             data/csv.ts     CSV 出力（UTF-8 BOM・CSVインジェクション対策）                   │
 └───────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -114,13 +119,135 @@
 src/
   app/        ルーター・状態管理・レイアウト・テーマ・共通フック
   domain/     型・日付・検証・集計・テキスト処理 / helpdesk/（分類・検索・提案・状態遷移・秘密情報・分析・初期マスタ）
-  automation/ 入社準備エンジン（Phase 1）
+  automation/ 入社準備エンジン（Phase 1）、自動化エンジンと在庫関連の自動化（Phase 3）
   data/       IndexedDB・バックアップ・CSV
   services/   サービス層
-  demo/       架空企業のデモデータ（Phase 1 + ヘルプデスク）
+  demo/       架空企業のデモデータ（Phase 1 + ヘルプデスク + 在庫・資産・発注）
   features/   画面部品（フォーム・タスク行・ルール設定・実演ガイド・ヘルプデスク部品）
-  pages/      画面（helpdesk/、settings/ を含む）
+  pages/      画面（helpdesk/、settings/、inventory/、自動化センター を含む）
   ui/         汎用UI部品（Button, Card, Modal, Toast, グラフ など）
-e2e/          Playwright（Phase 1 / Phase 2 / マイグレーション）
+e2e/          Playwright（Phase 1 / Phase 2 / Phase 3 / マイグレーション）
 docs/         設計資料
 ```
+
+---
+
+## 9. Phase 3：在庫・資産・購買のデータモデル
+
+**「数量で管理する在庫」と「1台ずつ管理する資産」を分ける。** マウスやコピー用紙は数量（在庫数）だけを持ち、PC・スマートフォンは資産番号つきの個体として台帳で管理する。品目マスタの `tracking: 'quantity' | 'asset'` で切り替える。
+
+| ストア | 主なフィールド | インデックス |
+| --- | --- | --- |
+| items | code（ITM-0001）, name, category, maker, model, unit, tracking, minStock（発注点）, targetStock（適正在庫）, unitPrice（参考単価）, defaultLocationId, defaultSupplierId, active | byCode（**一意**） |
+| stockLevels | `id = itemId@locationId`, quantity（保管場所ごとの実在庫） | byItem |
+| stockMovements | type（receive/issue/transfer/adjust/stocktake）, delta, quantity, balanceAfter, reason, refType, refId, employeeId, at | byItem, byAt |
+| reservations | itemId, employeeId, quantity, status（active/backorder/fulfilled/released）, key（重複防止） | byItem, byEmployee |
+| assets | assetNumber（AST-0001）, itemId, serialNumber, status, assigneeId と受付時点の氏名・部署, purchaseCost（取得価額）, purchaseOrderId, warrantyUntil | byNumber（**一意**）, byItem, byAssignee |
+| assetEvents | assetId, type（register/reserve/release/assign/return/loan/status/edit）, fromStatus, toStatus, employeeId/Name, inquiryId, note, at | byAsset, byInquiry |
+| locations / suppliers | 保管場所 / 仕入先（架空・`.example` ドメイン） | — |
+| purchaseSuggestions | itemId, quantity（推奨）, reasons, status（open/ordered/dismissed/resolved） | byItem |
+| purchaseOrders | number（PO-年-連番）, supplierId, lines（quantity, unitPrice, receivedQuantity）, status, expectedDate, requestedBy, approvedBy, history | byNumber（**一意**） |
+| equipmentRules | scope（common / dept_xxx）, itemId, quantity | — |
+| automationRuns | automationId, key, status（applied/dismissed/failed/auto）, results, error, at | byKey |
+
+**在庫を直接書き換えない。** 数量の変更はすべて `applyMovement()` を通り、保管場所ごとの在庫を増減させると同時に入出庫履歴を1件追加する。実在庫は常に「入出庫履歴の合計」と一致し、バックアップの復元時にもこの一致を検査する（イベントソーシングの考え方。META_DESIGN R14）。取り消しも履歴を消さず、逆向きの記録（`refType: 'reversal'`）を足す。
+
+### 9.1 在庫の数量の定義（`domain/inventory/stock.ts`）
+
+| 用語 | 定義 |
+| --- | --- |
+| 実在庫 onHand | 保管場所ごとの在庫の合計（＝入出庫履歴の合計）。個体管理品は「未使用＋予約済み」の資産数 |
+| 予約 reserved | 引き当て済みの数量（入社者向けなど）。出庫はされていない |
+| 利用可能 available | onHand − reserved。出庫・新たな予約はこの範囲だけ |
+| 入荷待ち需要 backorder | 在庫がなく引き当てられなかった予約（入荷したら古い順に自動で引き当て） |
+| 発注残 onOrder | 承認済み・一部入荷の発注書の未入荷数 |
+| 計画中 planned | 下書き・承認待ちの発注書の数量 |
+| 見込み在庫 projected | available − backorder + onOrder |
+| 在庫不足 | projected < minStock |
+| 推奨発注数 | targetStock − (projected + planned)（0以下なら候補を作らない） |
+
+発注残は**在庫ではなく見込みにだけ**加算する。入荷登録（承認済みの発注書のみ・未入荷数まで）で初めて実在庫が増える。
+
+### 9.2 状態遷移
+
+```
+資産:   未使用 ──予約──> 予約済み ──引き渡し──> 使用中 ──返却──> 未使用 / 修理中 / 故障
+          │                │                   │
+          └───────<予約解除─┘                   └──故障受付──> 修理中 ──> 未使用
+        未使用・修理中・故障 ──> 廃棄予定 ──> 廃棄済み（最終・戻せない）   ※廃棄予定 → 未使用 には戻せる
+        使用中 ──> 修理中 / 故障、 故障 ⇄ 修理中、 修理中 ──> 未使用
+        ※ 予約済みの機器は予約した本人以外に貸し出せない／使用中の機器を別の人に貸し出せない
+
+発注書: 下書き ──申請──> 承認待ち ──承認（承認者必須）──> 承認済み（入荷待ち）──入荷──> 一部入荷 ──> 入荷完了
+          │                 └──差し戻し──> 下書き
+          └─────取り消し（入荷前のみ）─────> 取消
+発注候補: 未対応(open) ──発注書作成──> 発注済み(ordered)  /  見送り(dismissed)  /  不足解消で自動終了(resolved)
+```
+
+## 10. 自動化エンジン（`automation/engine.ts`）
+
+UI から独立した純粋関数として実装し、画面・サービス層・テストのどこからでも同じ判定を呼べる。
+
+```ts
+interface AutomationDefinition {
+  id; name; description;
+  trigger: string;                 // 実行条件（画面に表示）
+  approval: 'required' | 'auto';   // 承認が必要か
+  detect(ctx: { data, today, stock }): AutomationProposal[];  // 純粋関数
+}
+interface AutomationProposal {
+  automationId; key;               // key = 対象 + 実行内容の指紋（重複防止）
+  title; conditions[];             // 提案の根拠
+  actions: { id, kind, label, requiresApproval, ... }[];  // 実行内容（チェックで選択）
+  warnings[];
+}
+```
+
+| 自動化 | 実行条件 | 実行内容 | 承認 |
+| --- | --- | --- | --- |
+| 入社準備：必要機器の判定と確保 | 入社予定者がいる（入社日の早い順に在庫を割り当て） | 資産の予約・数量の予約・在庫不足は入荷待ち記録・準備タスク／部署異動で不要になった分の解除 | 要 |
+| 入社取り消し・退職：予約の解除 | 予約を持つ社員が退職扱い・削除済み | 予約の解除（資産は未使用に戻る） | 要 |
+| 退職予定者：貸与資産の返却 | 退職日まで30日以内で、使用中の資産がある | 資産ごとの返却確認タスク | 要 |
+| 故障受付：代替機の手配 | 未解決の問い合わせに故障を示す語があり、申請者に使用中の機器がある | 故障機を修理中に・代替機の貸出（なければ入荷待ち）・修理手配と引き渡しのタスク | 要 |
+| 在庫不足：発注候補の自動作成 | 在庫を変える操作のたび | 発注候補（下書き）の作成・更新・終了 | 自動（下書きのみ） |
+
+**実行の流れ（`InventoryService.applyProposal`）**
+1. 処理履歴（automationRuns）に同じ key の「実行・見送り」があれば何もしない（再読み込み・連打でも二重実行しない）
+2. **同じトランザクション内で判定をやり直し**、key が一致し、選んだ操作がすべて残っていることを確認する。状況が変わっていれば「状況が変わったため実行できません」で全体を取り消す
+3. 選んだ操作を順に実行（予約・貸出・状態変更・タスク作成）。途中で失敗したら全体を取り消し、失敗を別トランザクションで処理履歴に記録
+4. 成功時は実行結果を処理履歴に記録。発注候補の同期も同じトランザクションで行う
+
+判定はデータの並び順に依存しない（全判定で入社日・受付日時・番号の順に並べてから割り当てる）。承認時の再計算と画面表示の提案が一致することを単体テストで確認している。
+
+## 11. 部門をまたぐ連携（同じ情報を再入力しない）
+
+```
+社員（入社日・部署） ──判定──> 必要機器 ──承認──> 予約（社員に紐づく）＋ 準備タスク（社員・資産に紐づく）
+                                    └─在庫不足─> 入荷待ち ──> 発注候補 ──> 発注書 ──入荷──> 自動で引き当て
+問い合わせ（申請者） ──判定──> 申請者の使用中機器 ──承認──> 修理中 ＋ 代替機の貸出（資産の履歴に問い合わせID）
+                                                          ＋ タスク（問い合わせ・資産に紐づく）
+社員（退職日） ──判定──> 使用中の資産 ──承認──> 返却確認タスク（資産ごと）
+```
+
+- 社員詳細に「貸与機器・予約」、問い合わせ詳細に「関連機器」（提案もその場で承認可能）、タスクに資産へのリンクを表示し、どこからでも関連先へ移動できる
+- 問い合わせに紐づくタスクは `source: 'inquiry'`（問い合わせの対応タスクとして扱う）、それ以外の自動化タスクは `source: 'automation'`
+
+## 12. スキーマのマイグレーション（v2 → v3）とバックアップ
+
+- `migrateToV3`：在庫関連の12ストアを作成し、保管場所・仕入先の初期マスタだけを投入（品目・在庫は空）。既存の社員・タスク・問い合わせ・FAQ には触れない。`meta.schemaMigratedToV3` に日時を記録
+- 既存利用者は「データ管理 → 在庫のデモデータを追加」で、既存データを残したまま在庫デモ（品目・資産・発注書・機器ルール）を追加できる（品目が1件でもあれば実行しない）
+- バックアップは `schemaVersion: 3`。v1・v2 を読み込んだ場合は在庫を空・マスタを初期値で補う
+- 復元時の検証：型ガード、参照整合性（在庫→品目・保管場所、資産→品目・社員、発注書→仕入先・品目、予約→品目など）、**在庫数＝入出庫履歴の合計**。1つでも不一致なら現在のデータを一切変更しない
+
+## 13. 整合性のための仕組み（Phase 3 追加分）
+
+| リスク | 対策 |
+| --- | --- |
+| 二重出庫・連打・再読み込みでの重複 | 画面ごとに `requestId` を発行し、`meta.req:<id>` で処理済みを判定（Phase 2 と同じ）。自動化は処理履歴の key で判定 |
+| マイナス在庫 | `applyMovement()` が保管場所単位で検査し、マイナスになる操作は全体を取り消す |
+| 予約分の出庫 | 出庫は利用可能数（実在庫 − 予約）まで |
+| 二重貸出 | 資産の状態遷移を限定（使用中→貸出不可、他人の予約済み→貸出不可） |
+| 入荷完了前の在庫加算 | 入荷登録は承認済み・一部入荷の発注書だけ、未入荷数まで |
+| 部分的な失敗 | すべての操作を1つの IndexedDB トランザクションで実行し、例外時は `abortWith()` で全体を取り消す（MDN IDBTransaction、META_DESIGN R16） |
+| 削除による履歴消失 | 履歴のある品目は無効化のみ。資産は削除せず「廃棄済み」。資産・予約を持つ社員は削除不可 |
+| 古い提案の実行 | 承認時に再判定し、key・選択した操作が一致しなければ拒否 |

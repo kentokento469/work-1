@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { computeDashboard } from './analytics';
+import { emptyInventory } from './inventory/defaults';
 import { createDemoData } from '../demo/demoData';
 import { suggestEmployeeStatus, normalizeEmployeeNumber } from './validation';
 import { toPreviousBusinessDay, isValidISODate } from './date';
@@ -25,7 +26,7 @@ describe('computeDashboard', () => {
   });
 
   it('タスク0件でも完了率は0%', () => {
-    const s = computeDashboard({ departments: [], employees: [], tasks: [], rules: [], activities: [], inquiries: [], faqs: [], inquiryCategories: [] }, TODAY);
+    const s = computeDashboard({ ...emptyInventory(false), departments: [], employees: [], tasks: [], rules: [], activities: [], inquiries: [], faqs: [], inquiryCategories: [] }, TODAY);
     expect(s.completionRate).toBe(0);
   });
 });

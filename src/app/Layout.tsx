@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react';
 import {
   BookOpen,
+  Boxes,
+  Sparkles,
   ClipboardList,
   Database,
   Headset,
@@ -32,7 +34,9 @@ interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   { key: 'dashboard', href: '#/', label: 'ダッシュボード', icon: LayoutDashboard },
   { key: 'helpdesk', href: '#/helpdesk', label: 'ヘルプデスク', icon: Headset },
+  { key: 'inventory', href: '#/inventory', label: '在庫・資産・購買', icon: Boxes },
   { key: 'tasks', href: '#/tasks', label: 'タスク管理', icon: ClipboardList },
+  { key: 'automation', href: '#/automation', label: '自動化センター', icon: Sparkles },
   { key: 'employees', href: '#/employees', label: '社員管理', icon: Users },
   { key: 'onboarding', href: '#/onboarding', label: '入社準備', icon: UserPlus },
   { key: 'faq', href: '#/faq', label: 'FAQ', icon: BookOpen },
@@ -44,12 +48,12 @@ export const NAV_ITEMS: NavItem[] = [
 const BOTTOM_ITEMS: (NavItem & { short: string; covers?: string[] })[] = [
   { key: 'dashboard', href: '#/', label: 'ダッシュボード', short: 'ホーム', icon: LayoutDashboard },
   { key: 'helpdesk', href: '#/helpdesk', label: 'ヘルプデスク', short: '問い合わせ', icon: Headset },
+  { key: 'inventory', href: '#/inventory', label: '在庫・資産・購買', short: '在庫', icon: Boxes },
   { key: 'tasks', href: '#/tasks', label: 'タスク管理', short: 'タスク', icon: ClipboardList },
-  { key: 'employees', href: '#/employees', label: '社員管理', short: '社員', icon: Users },
-  { key: 'menu', href: '#/menu', label: 'メニュー', short: 'メニュー', icon: Menu, covers: ['menu', 'onboarding', 'faq', 'data', 'settings'] },
+  { key: 'menu', href: '#/menu', label: 'メニュー', short: 'メニュー', icon: Menu, covers: ['menu', 'employees', 'onboarding', 'faq', 'data', 'settings', 'automation'] },
 ];
 
-const FUTURE_MODULES = ['請求書・領収書処理', '在庫・発注管理', 'ワークフロー自動化'];
+const FUTURE_MODULES = ['請求書・領収書処理', 'ワークフロー（承認経路）'];
 
 function ThemeButton({ className }: { className?: string }) {
   const { mode, cycle } = useTheme();
@@ -89,16 +93,26 @@ export function DemoNotice({ compact }: { compact?: boolean }) {
     <p className={cx('flex items-start gap-1.5 text-slate-500 dark:text-slate-400', compact ? 'text-[10px] leading-snug' : 'text-xs leading-relaxed')}>
       <Info className="mt-0.5 size-3 shrink-0" aria-hidden />
       <span>
-        デモ環境：データはこの端末のブラウザにのみ保存されます。複数端末での共有・ログイン認証・権限管理はありません。架空の企業・社員データを使用しています。
+        デモ環境：データはこの端末のブラウザにのみ保存されます。複数端末・複数ユーザーでの共有や同時利用、ログイン認証・権限管理、サーバー側でのデータ保護はありません。発注・メール送信・決済は外部に送られません。架空の企業・社員データを使用しています。
       </span>
     </p>
   );
 }
 
 export function Layout({ active, children }: { active: string; children: ReactNode }) {
-  const { stats, helpdeskStats, today } = useAppData();
-  const badge = (key: string) => (key === 'tasks' ? stats.overdueTaskCount : key === 'helpdesk' ? helpdeskStats.overdueCount + helpdeskStats.newCount : 0);
-  const badgeLabel = (key: string) => (key === 'tasks' ? '期限超過のタスク' : '新規・期限超過の問い合わせ');
+  const { stats, helpdeskStats, inventoryStats, proposals, today } = useAppData();
+  const badge = (key: string) =>
+    key === 'tasks'
+      ? stats.overdueTaskCount
+      : key === 'helpdesk'
+        ? helpdeskStats.overdueCount + helpdeskStats.newCount
+        : key === 'inventory'
+          ? inventoryStats.shortageItems
+          : key === 'automation' || key === 'menu'
+            ? proposals.length
+            : 0;
+  const badgeLabel = (key: string) =>
+    ({ tasks: '期限超過のタスク', helpdesk: '新規・期限超過の問い合わせ', inventory: '在庫不足の品目', automation: '承認待ちの自動化提案', menu: '承認待ちの自動化提案' })[key] ?? '';
 
   return (
     <div className="min-h-dvh">

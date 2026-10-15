@@ -1,4 +1,4 @@
-import { Building2, Headset, User } from 'lucide-react';
+import { Building2, Headset, Laptop, User } from 'lucide-react';
 import { useAppData } from '../app/AppData';
 import { isTaskOverdue } from '../domain/analytics';
 import { TASK_STATUSES, TASK_STATUS_LABEL, type Task, type TaskStatus } from '../domain/types';
@@ -41,6 +41,7 @@ export function TaskItem({ task, onOpen, showEmployee = true }: { task: Task; on
   const { today, empById, deptById, data } = useAppData();
   const emp = task.employeeId ? empById.get(task.employeeId) : undefined;
   const inquiry = task.inquiryId ? data.inquiries.find((i) => i.id === task.inquiryId) : undefined;
+  const asset = task.assetId ? data.assets.find((a) => a.id === task.assetId) : undefined;
   const overdue = isTaskOverdue(task, today);
   return (
     <li
@@ -60,6 +61,7 @@ export function TaskItem({ task, onOpen, showEmployee = true }: { task: Task; on
               <PriorityBadge priority={task.priority} />
               {task.source === 'onboarding' && <AutoBadge />}
               {task.source === 'inquiry' && <AutoBadge label="問い合わせ由来" />}
+              {task.source === 'automation' && <AutoBadge label="自動化" />}
             </div>
             <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-slate-500 dark:text-slate-400">
               {showEmployee && emp && (
@@ -82,6 +84,12 @@ export function TaskItem({ task, onOpen, showEmployee = true }: { task: Task; on
             >
               <Headset className="size-3" aria-hidden />
               問い合わせ {inquiry.number}
+            </a>
+          )}
+          {asset && (
+            <a href={`#/inventory/assets/${asset.id}`} className="ml-3 mt-0.5 inline-flex min-h-8 items-center gap-1 text-xs font-semibold text-navy-600 underline-offset-2 hover:underline dark:text-navy-300">
+              <Laptop className="size-3" aria-hidden />
+              資産 {asset.assetNumber}
             </a>
           )}
         </div>

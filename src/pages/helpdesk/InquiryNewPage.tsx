@@ -4,7 +4,7 @@
  * - 送信ボタンの連打・通信再試行でも1件しか登録されない (requestId による冪等処理)
  * - 入力中に関連FAQを表示し、FAQで解決できる問い合わせに早く気づけるようにする
  */
-import { useCallback, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { ArrowLeft, BookOpenCheck, RotateCcw, Send } from 'lucide-react';
 import { useAppData } from '../../app/AppData';
 import { clearDraft, useDraft } from '../../app/hooks';
@@ -26,6 +26,14 @@ export function InquiryNewPage({ query }: { query: URLSearchParams }) {
   const setState = useCallback((u: (s: InquiryFormState) => InquiryFormState) => setStateRaw(u), []);
   const [errors, setErrors] = useState<FieldErrors<InquiryInput>>({});
   const [saving, setSaving] = useState(false);
+  // 値が変わった項目のエラーは消す (自動分類でカテゴリが後から入った場合など、古いエラーを残さない)
+  const prevInput = useRef(state.input);
+  useEffect(() => {
+    const prev = prevInput.current;
+    prevInput.current = state.input;
+    const changed = (Object.keys(state.input) as (keyof InquiryInput)[]).filter((k) => prev[k] !== state.input[k]);
+    if (changed.length) setErrors((e) => (changed.some((k) => k in e) ? Object.fromEntries(Object.entries(e).filter(([k]) => !changed.includes(k as keyof InquiryInput))) : e));
+  }, [state.input]);
   // フォームを開いた単位で1つの requestId を使う → 連打しても同じ問い合わせとして扱われる
   const [requestId, setRequestId] = useState(() => generateId('req'));
   const classification = useClassification(state.input.title, state.input.body);

@@ -15,6 +15,7 @@ function toNextBusinessDay(d: ISODate): ISODate {
 import { generateId } from '../domain/id';
 import { createDefaultInquiryCategories } from '../domain/helpdesk/defaults';
 import { createHelpdeskDemoData } from './helpdeskDemo';
+import { createInventoryDemo } from './inventoryDemo';
 
 export { createHelpdeskDemoData } from './helpdeskDemo';
 import type {
@@ -130,7 +131,7 @@ export function createDemoData(today: ISODate): DataSnapshot {
     ['A0031', '高橋 誠', DEPT.eigyo, '営業部長', '正社員', -4000, 'active'],
     ['A0032', '伊藤 大輔', DEPT.eigyo, '主任', '正社員', -1500, 'active'],
     ['A0033', '渡辺 さくら', DEPT.eigyo, '', '正社員', -700, 'active'],
-    ['A0034', '山田 隆', DEPT.eigyo, '', '派遣社員', -200, 'active'],
+    ['A0034', '山田 隆', DEPT.eigyo, '', '派遣社員', -200, 'active', '派遣契約の満了により退職予定', 20],
     ['A0035', '石川 恭平', DEPT.eigyo, '', '正社員', -1200, 'leave', '育児休業中（復職予定あり）'],
     ['A0041', '田中 聡', DEPT.kaihatsu, '開発部長', '正社員', -3000, 'active'],
     ['A0042', '鈴木 陽子', DEPT.kaihatsu, 'リードエンジニア', '正社員', -1800, 'active'],
@@ -252,7 +253,10 @@ export function createDemoData(today: ISODate): DataSnapshot {
     act(60 * 2, 'inquiry', 'create', `問い合わせ ${helpdesk.inquiries.at(-1)?.number ?? ''} を受け付けました`),
   );
 
+  const inventory = createInventoryDemo(today, employees);
+
   return {
+    ...inventory,
     departments,
     employees,
     tasks: [...tasks, ...helpdesk.tasks],

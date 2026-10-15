@@ -37,8 +37,14 @@ export function useRoute(): Route {
       setRoute(next);
       if (samePage) return; // タブ切替などクエリだけの変更ではスクロールしない
       const saved = scrollPositions.get(next.path) ?? 0;
-      // 描画後に復元する
-      requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo({ top: saved })));
+      // 描画後に復元する。遅延読み込みやデータ再取得で高さが足りない間は、最大2秒まで再試行する
+      const started = performance.now();
+      const restore = () => {
+        if (currentPath !== next.path) return;
+        window.scrollTo({ top: saved });
+        if (Math.abs(window.scrollY - saved) > 1 && performance.now() - started < 2000) requestAnimationFrame(restore);
+      };
+      requestAnimationFrame(() => requestAnimationFrame(restore));
     };
     window.addEventListener('hashchange', onChange);
     window.addEventListener('scroll', onScroll, { passive: true });
