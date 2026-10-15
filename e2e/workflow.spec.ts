@@ -157,7 +157,8 @@ test('[Phase1] ナビゲーション・テーマ切替・入力エラー表示',
   if (isMobile) {
     // スマホでは入社準備は「メニュー」内
     await nav.getByRole('link', { name: 'メニュー' }).click();
-    await page.getByRole('link', { name: /入社準備/ }).click();
+    // Phase 6 からメニュー上部に「対応が必要な項目」(入社準備の提案など) も並ぶため、メニュー項目を指定する
+    await page.locator('[data-menu-item="onboarding"] a').click();
   } else {
     await nav.getByRole('link', { name: '入社準備' }).click();
   }
@@ -175,7 +176,7 @@ test('[Phase1] ナビゲーション・テーマ切替・入力エラー表示',
   if (isMobile) {
     // Phase 3 から下部ナビは「在庫」を優先し、社員管理は「メニュー」内
     await nav.getByRole('link', { name: 'メニュー' }).click();
-    await page.getByRole('link', { name: /社員管理/ }).click();
+    await page.locator('[data-menu-item="employees"] a').click();
   } else {
     await nav.getByRole('link', { name: '社員管理' }).click();
   }
