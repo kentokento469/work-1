@@ -25,6 +25,7 @@ const loaders = {
   documents: () => import('../pages/documents/DocumentsPage'),
   documentImport: () => import('../pages/documents/DocumentImportPage'),
   documentDetail: () => import('../pages/documents/DocumentDetailPage'),
+  notifications: () => import('../pages/NotificationsPage'),
 };
 
 // 使用頻度の低い画面・ヘルプデスクは初回表示を軽くするため遅延読み込みする
@@ -44,6 +45,7 @@ const StocktakePage = lazy(() => loaders.inventoryDetail().then((m) => ({ defaul
 const AutomationPage = lazy(() => loaders.automation().then((m) => ({ default: m.AutomationPage })));
 const DocumentsPage = lazy(() => loaders.documents().then((m) => ({ default: m.DocumentsPage })));
 const DocumentImportPage = lazy(() => loaders.documentImport().then((m) => ({ default: m.DocumentImportPage })));
+const NotificationsPage = lazy(() => loaders.notifications().then((m) => ({ default: m.NotificationsPage })));
 const DocumentDetailPage = lazy(() => loaders.documentDetail().then((m) => ({ default: m.DocumentDetailPage })));
 
 /** 初回表示の後、残りの画面を先読みして画面遷移時の読み込み待ち (ちらつき) をなくす */
@@ -89,6 +91,9 @@ function Routes() {
     case 'menu':
       page = <MenuPage />;
       break;
+    case 'notifications':
+      page = <NotificationsPage />;
+      break;
     case 'inventory':
       page =
         second === 'items' && third ? (
@@ -104,7 +109,7 @@ function Routes() {
         );
       break;
     case 'automation':
-      page = <AutomationPage />;
+      page = <AutomationPage query={route.query} />;
       break;
     case 'documents':
       page = second === 'new' ? <DocumentImportPage query={route.query} /> : second ? <DocumentDetailPage id={second} query={route.query} /> : <DocumentsPage />;

@@ -65,8 +65,10 @@ export function EmployeeFormModal({
             notes: '',
             contact: emptyContact(),
           },
-    // モーダルを開くたびに初期化する (open を依存に含める)
-    [employee, open, data.employees],
+    // モーダルを開くたびに初期化する。入力中にデータが再読み込みされても (自動実行・通知の更新など) 入力を消さないよう、
+    // 社員一覧 (次の社員番号の提案) は依存に含めない
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [employee, open],
   );
 
   const [form, setForm] = useState<EmployeeInput>(initial);

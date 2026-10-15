@@ -5,6 +5,7 @@
  * ヘルプデスク関連は HelpdeskService (this.helpdesk) に分離している。
  */
 import { buildOnboardingPlan, materializePlan, type OnboardingPlan, type PlanItemOverride } from '../automation/onboardingEngine';
+import { NOTICE_SETTING_ID, markNoticesRead, readNoticeState, syncNoticeLog, type AppNotice } from '../domain/notifications';
 import { today as todayISO } from '../domain/date';
 import { generateId, nowISO } from '../domain/id';
 import { cleanContact, normalizeEmployeeNumber, validateEmployee, validateRule, validateTask, type EmployeeInput, type RuleInput, type TaskInput } from '../domain/validation';
@@ -528,6 +529,29 @@ export class WorkCoreService {
     await tx.objectStore('settings').put({ id: AUTOMATION_SETTING_ID, value, updatedAt: nowISO() });
     await logActivity(tx, 'automation', 'setting', `自動化「${def.name}」を${setting.enabled ? (setting.mode === 'auto' ? '自動実行' : '確認してから実行') : '無効'}にしました`);
     await tx.done;
+  }
+
+  /**
+   * 通知の記録 (初回検出・解消・既読) を現在の通知に合わせる。変化がなければ書き込まない。
+   * 業務データは変えないため操作履歴には残さない
+   */
+  async syncNotices(notices: AppNotice[]): Promise<boolean> {
+    const tx = this.db.transaction('settings', 'readwrite');
+    const rec = await tx.store.get(NOTICE_SETTING_ID);
+    const { state, changed } = syncNoticeLog(readNoticeState({ settings: rec ? [rec] : [] }), notices, nowISO());
+    if (changed) await tx.store.put({ id: NOTICE_SETTING_ID, value: state, updatedAt: nowISO() });
+    await tx.done;
+    return changed;
+  }
+
+  /** 通知を既読にする (未処理の件数は変わらない) */
+  async markNoticesRead(ids: string[]): Promise<boolean> {
+    const tx = this.db.transaction('settings', 'readwrite');
+    const rec = await tx.store.get(NOTICE_SETTING_ID);
+    const { state, changed } = markNoticesRead(readNoticeState({ settings: rec ? [rec] : [] }), ids, nowISO());
+    if (changed) await tx.store.put({ id: NOTICE_SETTING_ID, value: state, updatedAt: nowISO() });
+    await tx.done;
+    return changed;
   }
 
   /**

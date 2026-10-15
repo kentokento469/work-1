@@ -2,6 +2,7 @@
  * 在庫の詳細画面: 品目詳細 / 資産詳細 / 発注書詳細 / 棚卸。
  */
 import { RelatedDocumentsCard } from '../../features/documents/light';
+import { TargetNotices } from '../../ui/notices';
 import { BackLink } from '../../app/BackLink';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
@@ -61,6 +62,7 @@ export function ItemDetailPage({ itemId }: { itemId: string }) {
   return (
     <>
       <Back href="#/inventory" label="在庫一覧" />
+      <TargetNotices targetId={item.id} />
       <Card className="p-4 sm:p-6">
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="font-mono text-xs text-slate-500">{item.code}</span>
@@ -472,6 +474,7 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
   return (
     <>
       <Back href="#/inventory?tab=orders" label="発注一覧" />
+      <TargetNotices targetId={po.id} />
       <div className="mb-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
         <Info className="mt-0.5 size-4 shrink-0" aria-hidden />
         アプリ内の発注依頼書（下書き・承認・入荷の記録）です。外部への注文・メール送信・決済は行いません。実際の発注は社内の購買手続きで行ってください。

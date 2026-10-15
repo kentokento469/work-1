@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import {
+  Bell,
   BookOpen,
   Boxes,
   Sparkles,
@@ -24,6 +25,8 @@ import { cx } from '../ui/primitives';
 import { DEMO_COMPANY_NAME } from '../demo/demoData';
 import { formatDateJa } from '../domain/date';
 import { useEdgeSwipeBack } from './swipeBack';
+import { NOTICE_KIND_LABEL, navNoticeSummary } from '../domain/notifications';
+import { NavCountBadge } from '../ui/notices';
 
 interface NavItem {
   key: string;
@@ -35,6 +38,7 @@ interface NavItem {
 /** PCサイドバー: 日常業務 → 管理 の順に並べる */
 export const NAV_ITEMS: NavItem[] = [
   { key: 'dashboard', href: '#/', label: 'ダッシュボード', icon: LayoutDashboard },
+  { key: 'notifications', href: '#/notifications', label: '通知センター', icon: Bell },
   { key: 'helpdesk', href: '#/helpdesk', label: 'ヘルプデスク', icon: Headset },
   { key: 'inventory', href: '#/inventory', label: '在庫・資産・購買', icon: Boxes },
   { key: 'documents', href: '#/documents', label: '書類管理', icon: FileText },
@@ -53,7 +57,7 @@ const BOTTOM_ITEMS: (NavItem & { short: string; covers?: string[] })[] = [
   { key: 'helpdesk', href: '#/helpdesk', label: 'ヘルプデスク', short: '問い合わせ', icon: Headset },
   { key: 'inventory', href: '#/inventory', label: '在庫・資産・購買', short: '在庫', icon: Boxes },
   { key: 'tasks', href: '#/tasks', label: 'タスク管理', short: 'タスク', icon: ClipboardList },
-  { key: 'menu', href: '#/menu', label: 'メニュー', short: 'メニュー', icon: Menu, covers: ['menu', 'employees', 'onboarding', 'faq', 'data', 'settings', 'automation', 'documents'] },
+  { key: 'menu', href: '#/menu', label: 'メニュー', short: 'メニュー', icon: Menu, covers: ['menu', 'notifications', 'employees', 'onboarding', 'faq', 'data', 'settings', 'automation', 'documents'] },
 ];
 
 const FUTURE_MODULES = ['ワークフロー（承認経路）'];
@@ -103,25 +107,15 @@ export function DemoNotice({ compact }: { compact?: boolean }) {
 }
 
 export function Layout({ active, children }: { active: string; children: ReactNode }) {
-  const { stats, helpdeskStats, inventoryStats, proposals, today, data } = useAppData();
+  const { notices, unreadCount, today } = useAppData();
   useEdgeSwipeBack();
-  const docsToReview = data.documents.filter((d) => !d.deletedAt && d.status === 'needs_review').length;
-  const badge = (key: string) =>
-    key === 'tasks'
-      ? stats.overdueTaskCount
-      : key === 'helpdesk'
-        ? helpdeskStats.overdueCount + helpdeskStats.newCount
-        : key === 'inventory'
-          ? inventoryStats.shortageItems
-          : key === 'automation'
-            ? proposals.length
-            : key === 'documents'
-              ? docsToReview
-              : key === 'menu'
-                ? proposals.length + docsToReview
-                : 0;
-  const badgeLabel = (key: string) =>
-    ({ tasks: '期限超過のタスク', helpdesk: '新規・期限超過の問い合わせ', inventory: '在庫不足の品目', automation: '承認待ちの自動化提案', documents: '確認待ちの書類', menu: '承認待ちの提案・確認待ちの書類' })[key] ?? '';
+  // バッジはすべて共通の通知 (実データから導出) から数える。件数 = 未処理 (対応が終わるまで残る)
+  const summary = (key: string) => navNoticeSummary(notices, key);
+  const badgeLabel = (key: string) => {
+    const sm = summary(key);
+    const parts = (['overdue', 'approval', 'review', 'attention'] as const).map((k) => [k, sm.items.filter((n) => n.kind === k).length] as const).filter(([, c]) => c > 0);
+    return `未処理 ${sm.count}件（${parts.map(([k, c]) => `${NOTICE_KIND_LABEL[k]} ${c}`).join('・')}）`;
+  };
 
   return (
     <div className="min-h-dvh">
@@ -133,7 +127,7 @@ export function Layout({ active, children }: { active: string; children: ReactNo
         <nav className="flex-1 space-y-0.5 overflow-y-auto px-3" aria-label="メインメニュー">
           {NAV_ITEMS.map((item) => {
             const on = item.key === active;
-            const n = badge(item.key);
+            const n = summary(item.key).count;
             return (
               <a
                 key={item.key}
@@ -146,10 +140,14 @@ export function Layout({ active, children }: { active: string; children: ReactNo
               >
                 <item.icon className={cx('size-[18px]', on ? 'text-navy-700 dark:text-navy-200' : 'text-slate-400')} aria-hidden />
                 <span className="flex-1">{item.label}</span>
-                {n > 0 && (
-                  <span className="rounded-full bg-red-600 px-1.5 text-[11px] font-bold text-white" aria-label={`${badgeLabel(item.key)} ${n}件`}>
-                    {n}
-                  </span>
+                {item.key === 'notifications' ? (
+                  unreadCount > 0 && (
+                    <span className="rounded-full px-1.5 text-[11px] font-bold text-navy-700 ring-1 ring-inset ring-navy-300 dark:text-navy-100 dark:ring-navy-600" aria-label={`未読の通知 ${unreadCount}件`}>
+                      {unreadCount}
+                    </span>
+                  )
+                ) : (
+                  <NavCountBadge count={n} worst={summary(item.key).worst} label={badgeLabel(item.key)} />
                 )}
               </a>
             );
@@ -176,7 +174,22 @@ export function Layout({ active, children }: { active: string; children: ReactNo
       <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/90 pt-safe backdrop-blur-md lg:hidden dark:border-navy-800 dark:bg-navy-900/90">
         <div className="flex h-14 items-center justify-between px-4">
           <Logo />
-          <ThemeButton className="-mr-2" />
+          <div className="-mr-2 flex items-center">
+            <a
+              href="#/notifications"
+              className="relative inline-flex size-11 items-center justify-center rounded-lg text-slate-600 dark:text-slate-300"
+              aria-label={`通知センター（未処理 ${notices.filter((x) => x.actionable).length}件・未読 ${unreadCount}件）`}
+              data-testid="header-bell"
+            >
+              <Bell className="size-5" aria-hidden />
+              {unreadCount > 0 && (
+                <span className="absolute right-1 top-1.5 min-w-4 rounded-full bg-navy-700 px-1 text-center text-[10px] font-bold leading-4 text-white dark:bg-navy-300 dark:text-navy-950" aria-hidden>
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </span>
+              )}
+            </a>
+            <ThemeButton />
+          </div>
         </div>
       </header>
 
@@ -192,7 +205,7 @@ export function Layout({ active, children }: { active: string; children: ReactNo
         <div className="grid grid-cols-5">
           {BOTTOM_ITEMS.map((item) => {
             const on = item.key === active || (item.covers?.includes(active) ?? false);
-            const n = badge(item.key);
+            const n = summary(item.key).count;
             return (
               <a
                 key={item.key}
@@ -203,11 +216,7 @@ export function Layout({ active, children }: { active: string; children: ReactNo
                 {on && <span className="absolute top-0 h-0.5 w-10 rounded-full bg-navy-700 dark:bg-navy-300" aria-hidden />}
                 <span className="relative">
                   <item.icon className="size-[22px]" strokeWidth={on ? 2.25 : 1.75} aria-hidden />
-                  {n > 0 && (
-                    <span className="absolute -right-2.5 -top-1.5 min-w-4 rounded-full bg-red-600 px-1 text-center text-[10px] font-bold leading-4 text-white" aria-label={`${badgeLabel(item.key)} ${n}件`}>
-                      {n}
-                    </span>
-                  )}
+                  <NavCountBadge count={n} worst={summary(item.key).worst} label={badgeLabel(item.key)} className="absolute -right-3 -top-2 !text-[10px] !leading-4" />
                 </span>
                 {item.short}
               </a>

@@ -329,7 +329,9 @@ export function ItemFormModal({ open, onClose, item }: { open: boolean; onClose:
       item
         ? { code: item.code, name: item.name, category: item.category, maker: item.maker, model: item.model, unit: item.unit, tracking: item.tracking, minStock: item.minStock, targetStock: item.targetStock, unitPrice: item.unitPrice, defaultLocationId: item.defaultLocationId, defaultSupplierId: item.defaultSupplierId, notes: item.notes }
         : { code: nextCode(), name: '', category: 'other', maker: '', model: '', unit: '個', tracking: 'quantity', minStock: 1, targetStock: 3, unitPrice: 0, defaultLocationId: data.locations[0]?.id ?? null, defaultSupplierId: data.suppliers[0]?.id ?? null, notes: '' },
-    [item, open],
+    // 入力中のデータ再読み込みで入力を消さないよう、対象は ID で判定する
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [item?.id, open],
   );
   const [f, setF] = useState(initial);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -404,7 +406,8 @@ export function AssetFormModal({ open, onClose, asset, defaultItemId }: { open: 
     if (asset) return { itemId: asset.itemId, name: asset.name, category: asset.category, maker: asset.maker, model: asset.model, serialNumber: asset.serialNumber, purchaseDate: asset.purchaseDate, purchaseCost: asset.purchaseCost, warrantyUntil: asset.warrantyUntil, locationId: asset.locationId, notes: asset.notes };
     const it = data.items.find((i) => i.id === defaultItemId) ?? assetItems[0];
     return { itemId: it?.id ?? null, name: it?.name ?? '', category: it?.category ?? 'pc', maker: it?.maker ?? '', model: it?.model ?? '', serialNumber: '', purchaseDate: null, purchaseCost: it?.unitPrice ?? null, warrantyUntil: null, locationId: it?.defaultLocationId ?? data.locations[0]?.id ?? null, notes: '' };
-  }, [asset, open, defaultItemId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [asset?.id, open, defaultItemId]);
   const [f, setF] = useState(initial);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);

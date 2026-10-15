@@ -353,3 +353,20 @@ interface AssistProvider {
 - **戻るリンク**（`BackLink`）：直前の履歴が戻り先の画面なら `history.back()`、そうでなければ通常の移動。ブラウザの戻る・スワイプと同じ結果になり、一覧の条件（URL のクエリ）とスクロール位置（画面ごとに記録）が残る
 - **モーダル**：開くと `pushState({wcIdx, wcModal})`。戻る操作（popstate）で上のモーダルから閉じ、未保存の変更があれば履歴を積み直して破棄確認を出す。画面の操作で閉じたときはアプリ自身が `history.back()` で履歴を取り除く。その完了前の移動は、完了後にやり直す（Chromium は戻る処理で直前の移動を取り消すため）。保存後の画面移動（`navigate`）はモーダルの履歴を置き換える。閉じたモーダルの履歴に戻った場合は1つ飛ばす
 - **スワイプ**：ホーム画面から起動した単独表示（`display-mode: standalone` / `navigator.standalone`）のときだけ有効。左端 24px から始まり、横方向に固定されてから縦スクロールを止める。画面幅の30%以上か速いスワイプで `history.back()`（`canGoBack()` が false なら戻らない）。入力欄・`[data-no-swipe]`・横スクロール中の要素の上では反応しない。戻る処理中は次のスワイプを受け付けない。Safari のタブでは標準のスワイプに任せる（二重に戻らない）
+
+## 23. Phase 6：共通通知システム（`domain/notifications.ts`・`ui/notices.tsx`・`app/focus.ts`）
+
+```
+実データ (IndexedDB) ──loadSnapshot──▶ AppData
+   deriveNotices(data, today, stock, proposals)   … 純粋関数。同じ原因 = 同じ ID
+        │
+        ├─ navNoticeSummary(key) → ナビのバッジ (未処理件数・最も重い区分)
+        ├─ AttentionSection(modules) → 各画面上部の「要対応」(バッジと同じ対象)
+        ├─ TargetNotices(targetId) → 詳細画面の理由・操作 (表示で既読)
+        ├─ NotificationsPage → 未処理 / 未読 / 解消済み
+        └─ WorkCoreService.syncNotices() → settings['notifications'] に初回検出・解消・既読を記録 (変化時のみ書き込み)
+```
+
+- 通知 → 対象：`href` は詳細画面、または一覧の `?focus=<対象ID>`。一覧側は対象要素に `data-focus-id` を付け、`useFocusHighlight` が描画を待ってスクロール・強調し、URL から `focus` を外す。ルーターは `focus` 付きの遷移ではスクロール位置を復元しない
+- 一覧の絞り込み（`useQueryState`）は URL を先に書き換えてから state を更新する（同時に届く hashchange と競合しない）
+- 編集ダイアログの初期化は「開いた時・対象 ID が変わった時」だけ（背景のデータ再読み込みで入力を消さない）

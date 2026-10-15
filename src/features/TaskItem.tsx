@@ -37,7 +37,7 @@ export function StatusSelect({ task }: { task: Task }) {
   );
 }
 
-export function TaskItem({ task, onOpen, showEmployee = true }: { task: Task; onOpen: (t: Task) => void; showEmployee?: boolean }) {
+export function TaskItem({ task, onOpen, showEmployee = true, note }: { task: Task; onOpen: (t: Task) => void; showEmployee?: boolean; note?: string }) {
   const { today, empById, deptById, data } = useAppData();
   const emp = task.employeeId ? empById.get(task.employeeId) : undefined;
   const inquiry = task.inquiryId ? data.inquiries.find((i) => i.id === task.inquiryId) : undefined;
@@ -48,6 +48,7 @@ export function TaskItem({ task, onOpen, showEmployee = true }: { task: Task; on
       className={cx('relative transition-colors', overdue && 'bg-red-50/40 dark:bg-red-950/20')}
       data-testid="task-item"
       data-task-title={task.title}
+      data-focus-id={task.id}
     >
       {overdue && <span className="absolute inset-y-0 left-0 w-1 bg-red-500" aria-hidden />}
       <div className="flex items-start gap-3 px-4 py-3 sm:px-5">
@@ -77,6 +78,17 @@ export function TaskItem({ task, onOpen, showEmployee = true }: { task: Task; on
               </span>
             </div>
           </button>
+          {note && (
+            <p className="mt-1 text-xs font-semibold text-red-700 dark:text-red-300" data-testid="task-note">
+              {note}
+            </p>
+          )}
+          {emp && showEmployee && (
+            <a href={`#/employees/${emp.id}`} className="mr-3 mt-0.5 inline-flex min-h-8 items-center gap-1 text-xs font-semibold text-navy-600 underline-offset-2 hover:underline dark:text-navy-300">
+              <User className="size-3" aria-hidden />
+              {emp.name}さんの詳細
+            </a>
+          )}
           {inquiry && (
             <a
               href={`#/helpdesk/${inquiry.id}`}

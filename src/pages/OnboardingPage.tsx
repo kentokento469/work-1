@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { AttentionSection, TargetNotices } from '../ui/notices';
 import {
   ArrowRight,
   CalendarCheck,
@@ -31,6 +32,8 @@ export function OnboardingPage({ query }: { query: URLSearchParams }) {
   return (
     <>
       <PageHeader title="入社準備の自動化" description="社員の部署・雇用区分・入社日から、必要な準備タスクを自動判定して登録します" />
+      <AttentionSection modules={['onboarding']} description="入社日が近いのに準備タスクが残っている社員です" testId="onboarding-attention" />
+      {employeeId && <TargetNotices targetId={employeeId} />}
       <div className="mb-4 grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1 sm:inline-grid dark:bg-navy-900" role="tablist">
         {(
           [

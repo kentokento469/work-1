@@ -3,6 +3,7 @@
  * スマホでは「原本」「項目」を切り替え、PCでは左右に並べる。
  */
 import { useEffect, useState } from 'react';
+import { TargetNotices } from '../../ui/notices';
 import { BackLink } from '../../app/BackLink';
 import { Archive, Download, FileQuestion, FileText, History, Pencil, RotateCcw, ScanText, Trash2, Undo2 } from 'lucide-react';
 import { useAppData } from '../../app/AppData';
@@ -99,6 +100,7 @@ function Detail({ doc, autoProcess, keepType, run }: { doc: DocumentRecord; auto
   return (
     <>
       <BackLink href="#/documents">書類一覧</BackLink>
+      <TargetNotices targetId={doc.id} />
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <h1 className="font-mono text-lg font-bold" data-testid="doc-number">
           {doc.number}

@@ -2,6 +2,7 @@
  * 在庫・資産・自動化の共通部品。
  */
 import { useEffect, useState } from 'react';
+import { proposalFocusId } from '../../domain/notifications';
 import { AlertTriangle, CheckCircle2, ChevronDown, Cpu, Info, Minus, Plus, ShieldCheck, Sparkles, Zap } from 'lucide-react';
 import { useAppData } from '../../app/AppData';
 import type { AutomationProposal } from '../../automation/engine';
@@ -76,11 +77,15 @@ export function Stepper({ value, onChange, min = 1, max, label }: { value: numbe
  * 実行条件 (なぜ提案されたか) → 実行内容 (何が起きるか・承認が必要か) の順に示し、
  * 担当者が操作を選んでから「承認して実行」する。見送りも履歴に残る。
  */
-export function ProposalCard({ proposal, compact }: { proposal: AutomationProposal; compact?: boolean }) {
+export function ProposalCard({ proposal, compact, forceOpen }: { proposal: AutomationProposal; compact?: boolean; forceOpen?: boolean }) {
   const { run } = useAppData();
   const def = ALL_AUTOMATIONS.find((d) => d.id === proposal.automationId);
   const [selected, setSelected] = useState<Set<string>>(() => new Set(proposal.actions.map((a) => a.id)));
-  const [open, setOpen] = useState(!compact);
+  const [open, setOpen] = useState(!compact || !!forceOpen);
+  // 通知から移動してきた提案は開いた状態で表示する
+  useEffect(() => {
+    if (forceOpen) setOpen(true);
+  }, [forceOpen]);
   const [busy, setBusy] = useState(false);
   useEffect(() => setSelected(new Set(proposal.actions.map((a) => a.id))), [proposal.key, proposal.actions]);
 
@@ -97,7 +102,7 @@ export function ProposalCard({ proposal, compact }: { proposal: AutomationPropos
   };
 
   return (
-    <div className="rounded-2xl border border-navy-200 bg-white dark:border-navy-700 dark:bg-navy-900" data-testid="proposal-card" data-automation={proposal.automationId} data-proposal-title={proposal.title}>
+    <div className="rounded-2xl border border-navy-200 bg-white dark:border-navy-700 dark:bg-navy-900" data-testid="proposal-card" data-focus-id={proposalFocusId(proposal)} data-automation={proposal.automationId} data-proposal-title={proposal.title}>
       <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className="flex w-full items-start gap-3 p-4 text-left">
         <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-xl bg-navy-50 text-navy-700 dark:bg-navy-800 dark:text-navy-100">
           <Sparkles className="size-4" aria-hidden />

@@ -96,3 +96,19 @@
     transition-duration: 1ms !important;
   }
 }
+
+/* 通知・リンクから移動した対象の強調表示 (控えめに2回ほど縁取りを光らせて消える) */
+@keyframes wc-focus-ring {
+  0% { box-shadow: 0 0 0 0 rgb(59 91 160 / 0); background-color: rgb(59 91 160 / 0.10); }
+  25% { box-shadow: 0 0 0 3px rgb(59 91 160 / 0.45); }
+  100% { box-shadow: 0 0 0 0 rgb(59 91 160 / 0); background-color: transparent; }
+}
+.wc-focus {
+  animation: wc-focus-ring 2.4s ease-out;
+  border-radius: 0.75rem;
+  scroll-margin-top: 5rem;
+  scroll-margin-bottom: 6rem;
+}
+@media (prefers-reduced-motion: reduce) {
+  .wc-focus { animation: none; outline: 3px solid rgb(59 91 160 / 0.6); outline-offset: 2px; }
+}

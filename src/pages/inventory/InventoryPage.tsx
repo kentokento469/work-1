@@ -4,6 +4,7 @@
  * 頻度の高い操作 (入庫・出庫・貸出・返却) をカードから直接実行できるようにする。
  */
 import { useMemo, useState } from 'react';
+import { AttentionSection } from '../../ui/notices';
 import {
   AlertTriangle,
   ArrowDownToLine,
@@ -51,6 +52,7 @@ export function InventoryPage() {
   return (
     <>
       <PageHeader title="在庫・資産・購買" description="数量の変更はすべて入出庫履歴に記録されます。発注はアプリ内の下書き・記録のみです" />
+      <AttentionSection modules={['inventory']} description="下部ナビ「在庫」の件数の内訳です（在庫不足・発注書の承認待ち）" testId="inventory-attention" />
       <div className="mb-3 grid grid-cols-4 gap-1.5 sm:gap-2" data-testid="inventory-summary">
         {[
           { label: '在庫不足', value: st.shortageItems, onClick: () => setF({ tab: 'stock', state: 'shortage' }), tone: st.shortageItems ? 'text-amber-700 dark:text-amber-400' : '' },

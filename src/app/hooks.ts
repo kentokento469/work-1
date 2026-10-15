@@ -30,20 +30,22 @@ export function useQueryState<T extends Record<string, string>>(defaults: T): [T
     // read は defaults にのみ依存し、defaults は固定値
   }, []);
 
+  // URL の書き換えは state の更新処理の外で即座に行う (同時に届いた hashchange が古い URL を読んで上書きしないように)
+  const stateRef = useRef(state);
+  stateRef.current = state;
   const update = useCallback(
     (patch: Partial<T>) => {
-      setState((prev) => {
-        const next = { ...prev, ...patch };
-        const [path = '#/', query = ''] = window.location.hash.split('?');
-        const q = new URLSearchParams(query);
-        for (const [k, v] of Object.entries(next)) {
-          if (v === '' || v === defaults[k]) q.delete(k);
-          else q.set(k, v);
-        }
-        const qs = q.toString();
-        history.replaceState(history.state, '', `${window.location.pathname}${window.location.search}${path}${qs ? `?${qs}` : ''}`);
-        return next;
-      });
+      const next = { ...stateRef.current, ...patch };
+      stateRef.current = next;
+      const [path = '#/', query = ''] = window.location.hash.split('?');
+      const q = new URLSearchParams(query);
+      for (const [k, v] of Object.entries(next)) {
+        if (v === '' || v === defaults[k]) q.delete(k);
+        else q.set(k, v);
+      }
+      const qs = q.toString();
+      history.replaceState(history.state, '', `${window.location.pathname}${window.location.search}${path}${qs ? `?${qs}` : ''}`);
+      setState(next);
     },
     // defaults はレンダーごとに新しいオブジェクトになるが値は固定なので依存に含めない
     [],

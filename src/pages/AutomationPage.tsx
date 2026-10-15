@@ -10,16 +10,30 @@ import { readAutomationSettings, ruleSetting, type RuleMode } from '../automatio
 import { formatDateTimeJa } from '../domain/date';
 import { ProposalCard } from '../features/inventory/parts';
 import { Badge, Card, CardHeader, EmptyState, FilterSelect, PageHeader } from '../ui/primitives';
+import { MissingTargetNotice, TargetNotices } from '../ui/notices';
+import { useFocusHighlight } from '../app/focus';
+import { proposalFocusId } from '../domain/notifications';
 
-export function AutomationPage() {
+export function AutomationPage({ query }: { query: URLSearchParams }) {
   const { proposals, data, run } = useAppData();
+  // 通知から特定の提案・処理履歴へ (#/automation?focus=自動化ID|キー または run:処理ID)
+  const focusId = query.get('focus');
+  const focusProposal = focusId ? proposals.find((p) => proposalFocusId(p) === focusId) : undefined;
+  const focusRun = focusId?.startsWith('run:') ? data.automationRuns.slice(0, 40).find((r) => `run:${r.id}` === focusId) : undefined;
   const settings = readAutomationSettings(data);
   const [f, setF] = useQueryState({ type: '' });
-  const list = proposals.filter((p) => !f.type || p.automationId === f.type);
+  const list = proposals.filter((p) => !f.type || p.automationId === f.type || p === focusProposal);
+  useFocusHighlight(focusProposal || focusRun ? focusId : null);
   const runs = data.automationRuns.slice(0, 40);
   return (
     <>
       <PageHeader title="自動化センター" description="部門をまたぐ作業を自動で判定し、提案します。在庫・資産を変える操作は承認するまで実行されません" />
+      {focusId && !focusProposal && !focusRun && (
+        <MissingTargetNotice what={focusId.startsWith('run:') ? '処理履歴' : '自動化の提案'}>
+          {focusId.startsWith('run:') ? '' : '承認・見送り済みの提案は下の「処理履歴」で確認できます。'}
+        </MissingTargetNotice>
+      )}
+      {focusProposal && <TargetNotices targetId={focusId!} />}
       <Card className="mb-4 p-3">
         <FilterSelect
           label="自動化の種類"
@@ -34,7 +48,7 @@ export function AutomationPage() {
             <EmptyState icon={CheckCircle2} title="承認待ちの提案はありません" description="新入社員の登録・退職日の設定・故障の問い合わせ・在庫の変化に応じて自動で提案されます" />
           </Card>
         ) : (
-          list.map((p) => <ProposalCard key={`${p.automationId}|${p.key}`} proposal={p} compact={list.length > 2} />)
+          list.map((p) => <ProposalCard key={proposalFocusId(p)} proposal={p} compact={list.length > 2} forceOpen={p === focusProposal} />)
         )}
       </section>
 
@@ -107,14 +121,14 @@ export function AutomationPage() {
         ) : (
           <ul className="divide-y divide-slate-100 px-4 pb-3 sm:px-5 dark:divide-navy-800" data-testid="automation-runs">
             {runs.map((r) => (
-              <li key={r.id} className="py-2.5 text-sm">
+              <li key={r.id} className="py-2.5 text-sm" data-focus-id={`run:${r.id}`}>
                 <div className="flex items-center gap-2">
                   {r.status === 'applied' ? <CheckCircle2 className="size-4 text-emerald-600" aria-label="実行" /> : r.status === 'failed' ? <XCircle className="size-4 text-red-600" aria-label="失敗" /> : r.status === 'auto' ? <Sparkles className="size-4 text-navy-500" aria-label="自動実行" /> : <CircleSlash className="size-4 text-slate-400" aria-label="見送り" />}
                   <span className="min-w-0 flex-1 font-medium">{r.title}</span>
                   <Badge tone={r.status === 'applied' ? 'green' : r.status === 'failed' ? 'red' : r.status === 'auto' ? 'navy' : 'gray'}>{{ applied: '実行', failed: '失敗', auto: '自動', dismissed: '見送り' }[r.status]}</Badge>
                 </div>
                 {r.error && <p className="mt-0.5 pl-6 text-xs text-red-600 dark:text-red-400">{r.error}（変更はすべて取り消されました）</p>}
-                {r.results.length > 0 && r.status !== 'auto' && <p className="mt-0.5 pl-6 text-xs text-slate-500">{r.results.join('／')}</p>}
+                {r.results.length > 0 && <p className="mt-0.5 pl-6 text-xs text-slate-500">{r.results.join('／')}</p>}
                 <p className="pl-6 text-[11px] text-slate-400">{formatDateTimeJa(r.at)}</p>
               </li>
             ))}

@@ -1,4 +1,5 @@
 import { formatAddress } from '../ui/SmartInputs';
+import { TargetNotices } from '../ui/notices';
 import { BackLink } from '../app/BackLink';
 import { useState } from 'react';
 import { ClipboardList, Headset, Pencil, Plus, Trash2, UserX, Zap } from 'lucide-react';
@@ -62,6 +63,7 @@ export function EmployeeDetailPage({ employeeId }: { employeeId: string }) {
   return (
     <>
       <BackLink href="#/employees">社員一覧</BackLink>
+      <TargetNotices targetId={emp.id} />
 
       <Card className="p-4 sm:p-6">
         <div className="flex items-start gap-4">

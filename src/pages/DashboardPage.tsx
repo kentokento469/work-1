@@ -28,6 +28,7 @@ import { TASK_STATUS_LABEL, type ActivityCategory } from '../domain/types';
 import { STAFF_SEGMENTS, STAFF_SEGMENT_LABEL, type AttentionKind, type StaffSegment } from '../domain/analytics';
 import { formatHours } from '../domain/helpdesk/analytics';
 import { DemoGuide } from '../features/DemoGuide';
+import { NoticeSummaryCard } from '../features/NoticeSummaryCard';
 import { ProgressBar, ProgressRing, SegmentedBarRows, StackedBar } from '../ui/charts';
 
 const STAFF_COLOR: Record<StaffSegment, string> = {
@@ -128,6 +129,7 @@ export function DashboardPage() {
     <>
       <PageHeader title="ダッシュボード" description={`${DEMO_COMPANY_NAME}（架空）の業務状況をリアルタイムに集計しています`} />
       <DemoGuide />
+      <NoticeSummaryCard />
       <StatusSummaryCard />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
@@ -208,8 +210,8 @@ export function DashboardPage() {
               </ul>
             )}
             {s.attention.length > 7 && (
-              <a href="#/tasks?status=overdue" className="mt-1 block px-2 py-2 text-center text-xs font-semibold text-navy-600 dark:text-navy-300">
-                ほか {s.attention.length - 7}件を表示
+              <a href="#/notifications" className="mt-1 block px-2 py-2 text-center text-xs font-semibold text-navy-600 dark:text-navy-300">
+                ほか {s.attention.length - 7}件（通知センターで確認）
               </a>
             )}
           </div>

@@ -45,7 +45,9 @@ export function TaskFormModal({
             dueDate: addDays(today, 7),
             status: 'todo',
           },
-    [task, defaultEmployeeId, today, open],
+    // 入力中のデータ再読み込みで入力を消さないよう、対象は ID で判定する
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [task?.id, defaultEmployeeId, today, open],
   );
 
   const [form, setForm] = useState<TaskInput>(initial);

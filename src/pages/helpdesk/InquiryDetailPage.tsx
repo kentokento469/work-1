@@ -4,6 +4,7 @@
  * - 関連する社員・タスク・FAQへ1タップで移動できる
  */
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { TargetNotices } from '../../ui/notices';
 import { BackLink } from '../../app/BackLink';
 import {
   BookOpenCheck,
@@ -95,6 +96,7 @@ export function InquiryDetailPage({ inquiryId, query }: { inquiryId: string; que
   return (
     <>
       <BackLink href="#/helpdesk">問い合わせ一覧</BackLink>
+      <TargetNotices targetId={inquiry.id} />
 
       {justCreated && (
         <div className="mb-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100" role="status">
@@ -453,7 +455,9 @@ function EditInquiryModal({ open, onClose, inquiry }: { open: boolean; onClose: 
       // 編集時は自動入力で既存の値を上書きしない
       touched: { categoryId: true, priority: true, assignee: true, dueDate: true },
     }),
-    [inquiry, open],
+    // 入力中のデータ再読み込みで入力を消さないよう、対象は ID で判定する
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [inquiry.id, open],
   );
   const [state, setState] = useState(initial);
   const [errors, setErrors] = useState<FieldErrors<InquiryInput>>({});
@@ -634,7 +638,8 @@ function ResolveModal({ open, onClose, inquiry }: { open: boolean; onClose: () =
   const [saving, setSaving] = useState(false);
   useEffect(() => {
     if (open) setText(inquiry.resolution);
-  }, [open, inquiry.resolution]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
   const linkedFaq = data.faqs.find((f) => inquiry.faqIds.includes(f.id));
   const submit = async () => {
     setSaving(true);

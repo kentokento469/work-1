@@ -7,6 +7,11 @@ import { PRIORITIES, PRIORITY_LABEL, PRIORITY_WEIGHT, TASK_STATUS_LABEL, type Ta
 import { TaskFormModal } from '../features/TaskFormModal';
 import { TaskItem } from '../features/TaskItem';
 import { Button, Card, EmptyState, FilterDisclosure, FilterSelect, PageHeader, cx } from '../ui/primitives';
+import { AttentionSection, MissingTargetNotice } from '../ui/notices';
+import { useFocusHighlight } from '../app/focus';
+import type { NoticeModule } from '../domain/notifications';
+
+const TASK_MODULES: NoticeModule[] = ['tasks'];
 
 type StatusFilter = 'all' | 'open' | 'overdue' | 'todo' | 'in_progress' | 'on_hold' | 'done';
 const STATUS_TABS: { key: StatusFilter; label: string }[] = [
@@ -37,17 +42,10 @@ export function TasksPage({ query }: { query: URLSearchParams }) {
   const [editing, setEditing] = useState<Task | null>(null);
   const [creating, setCreating] = useState(false);
 
-  // ダッシュボードから特定タスクを開く (#/tasks?focus=id)
+  // 通知・ダッシュボード・関連情報から特定タスクへ (#/tasks?focus=id)
   const focusId = query.get('focus');
-  useEffect(() => {
-    if (!focusId) return;
-    const t = data.tasks.find((x) => x.id === focusId);
-    if (t) {
-      setStatus('all');
-      setEditing(t);
-    }
-    // focusId が変わった時だけ開く (data.tasks を依存に入れると保存のたびに再オープンしてしまう)
-  }, [focusId]);
+  const focusTask = focusId ? data.tasks.find((x) => x.id === focusId) : undefined;
+  const [filterAdjusted, setFilterAdjusted] = useState(false);
 
   const counts = useMemo(() => {
     const c: Record<StatusFilter, number> = { all: data.tasks.length, open: 0, overdue: 0, todo: 0, in_progress: 0, on_hold: 0, done: 0 };
@@ -86,6 +84,16 @@ export function TasksPage({ query }: { query: URLSearchParams }) {
     });
   }, [data.tasks, status, priority, dept, employee, source, keyword, sort, today, empById]);
 
+  // 対象が絞り込みで隠れていれば、条件を解除して表示する (期限超過のタスクは上の「要対応」に必ず表示される)
+  const focusVisible = !!focusTask && (isTaskOverdue(focusTask, today) || filtered.some((t) => t.id === focusTask.id));
+  useEffect(() => {
+    if (!focusTask || focusVisible) return;
+    setF({ status: 'all', q: '', priority: '', dept: '', employee: '', source: '' });
+    setFilterAdjusted(true);
+    // focusId が変わった時だけ調整する
+  }, [focusId]);
+  useFocusHighlight(focusTask ? focusId : null, focusVisible);
+
   const filteredEmployee = employee ? empById.get(employee) : undefined;
   const hasExtra = keyword || priority || dept || employee || source;
 
@@ -100,6 +108,24 @@ export function TasksPage({ query }: { query: URLSearchParams }) {
           </Button>
         }
       />
+
+      {focusId && !focusTask && <MissingTargetNotice what="タスク" />}
+      {filterAdjusted && focusTask && (
+        <p className="mb-3 rounded-xl bg-navy-50 p-3 text-xs text-navy-800 dark:bg-navy-800 dark:text-navy-100" role="status" data-testid="filter-adjusted">
+          「{focusTask.title}」が絞り込み条件で隠れていたため、条件を解除して表示しています
+        </p>
+      )}
+
+      <AttentionSection modules={TASK_MODULES} title="要対応（期限超過）" description="下部ナビ「タスク」の件数の内訳です。完了にするか期限を見直すと消えます" testId="task-attention">
+        {(items) => (
+          <ul className="divide-y divide-slate-100 dark:divide-navy-800" data-testid="task-attention-list">
+            {items.map((n) => {
+              const t = data.tasks.find((x) => x.id === n.target.id);
+              return t ? <TaskItem key={n.id} task={t} onOpen={setEditing} note={n.reason} /> : null;
+            })}
+          </ul>
+        )}
+      </AttentionSection>
 
       <div className="mb-3 flex flex-wrap gap-1.5" role="tablist" aria-label="進捗状況で絞り込み">
         {STATUS_TABS.map((t) => (

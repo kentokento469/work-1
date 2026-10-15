@@ -3,6 +3,7 @@
  * 検索・絞り込み条件は URL に保存するため、詳細から戻っても条件が保たれる。
  */
 import { useMemo } from 'react';
+import { AttentionSection } from '../../ui/notices';
 import { BarChart3, ChevronRight, Headset, List, Plus, Search, X } from 'lucide-react';
 import { useAppData } from '../../app/AppData';
 import { useQueryState } from '../../app/hooks';
@@ -79,6 +80,7 @@ export function HelpdeskPage() {
           </Button>
         }
       />
+      <AttentionSection modules={['helpdesk']} description="下部ナビ「問い合わせ」の件数の内訳です（期限超過・未受付）。対応が進むと自動で消えます" testId="helpdesk-attention" />
 
       <div className="mb-4 grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1 sm:inline-grid dark:bg-navy-900" role="tablist">
         {(

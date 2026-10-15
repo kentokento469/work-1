@@ -246,7 +246,8 @@ export function useRoute(): Route {
       currentPath = next.path;
       setRoute(next);
       if (samePage) return; // タブ切替などクエリだけの変更ではスクロールしない
-      const saved = scrollPositions.get(next.path) ?? 0;
+      // 対象を指定した遷移 (focus=) は、対象までのスクロールを画面側が行うので位置を復元しない
+      const saved = next.query.has('focus') ? 0 : (scrollPositions.get(next.path) ?? 0);
       // 先頭に戻すだけなら描画を待たずにその場で行う (待つ間に始まった操作を後から上書きしない)
       if (saved <= 0) {
         window.scrollTo({ top: 0 });

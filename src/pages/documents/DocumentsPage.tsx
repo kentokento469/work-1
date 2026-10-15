@@ -3,6 +3,7 @@
  * 確認待ちの書類には「未確認の重要項目」「要確認の項目」の数を表示し、次に何をすべきかを一覧で分かるようにする。
  */
 import { useMemo, useState } from 'react';
+import { AttentionSection } from '../../ui/notices';
 import { CheckSquare, CircleAlert, FileDown, FilePlus2, FileText, Paperclip, Search, Share2, Square, X } from 'lucide-react';
 import { useAppData } from '../../app/AppData';
 import { canShareFiles, downloadText, shareTextFiles, timestampForFile } from '../../app/download';
@@ -75,6 +76,7 @@ export function DocumentsPage() {
           </a>
         }
       />
+      <AttentionSection modules={['documents']} description="確認待ちの書類です。原本と照合して「確認完了」にすると消えます" testId="documents-attention" />
       <div className="mb-3 flex gap-1.5 overflow-x-auto pb-1" role="tablist" aria-label="処理状態で絞り込み">
         {TABS.map((t) => (
           <button

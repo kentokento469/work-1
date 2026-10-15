@@ -13,6 +13,7 @@ import { ALL_AUTOMATIONS } from '../automation/registry';
 import { readAutomationSettings, ruleSetting } from '../automation/settings';
 import { pendingProposals, type AutomationProposal } from '../automation/engine';
 import type { DataSnapshot, Department, Employee } from '../domain/types';
+import { deriveNotices, isUnread, readNoticeState, type AppNotice, type NoticeState } from '../domain/notifications';
 import { AppError, WorkCoreService } from '../services/workcoreService';
 import { useToast } from '../ui/Toast';
 
@@ -26,6 +27,13 @@ interface AppDataValue {
   inventoryStats: InventoryStats;
   /** 承認待ちの自動化提案 */
   proposals: AutomationProposal[];
+  /** 実データから導出した通知 (未処理・お知らせ)。バッジ・通知センター・各画面の「要対応」はすべてこれを使う */
+  notices: AppNotice[];
+  /** 通知の既読・解消の記録 */
+  noticeState: NoticeState;
+  unreadCount: number;
+  /** 通知を既読にする (未処理件数は変わらない) */
+  markNoticesRead: (ids: string[]) => void;
   today: string;
   deptById: Map<string, Department>;
   empById: Map<string, Employee>;
@@ -124,6 +132,46 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     void runAuto(service);
   }, [service, runAuto]);
 
+  /** 通知の記録を実データに合わせる。変化があったときだけ保存して設定を読み直す (同時に1つだけ実行) */
+  const noticeSync = useRef({ running: false, again: null as AppNotice[] | null });
+  const syncNotices = useCallback(
+    async (notices: AppNotice[]) => {
+      if (!service) return;
+      if (noticeSync.current.running) {
+        noticeSync.current.again = notices;
+        return;
+      }
+      noticeSync.current.running = true;
+      try {
+        let next: AppNotice[] | null = notices;
+        let changed = false;
+        while (next) {
+          noticeSync.current.again = null;
+          changed = (await service.syncNotices(next).catch(() => false)) || changed;
+          next = noticeSync.current.again;
+        }
+        if (changed) {
+          const data = await service.loadSnapshot();
+          setState((s) => (s.status === 'ready' ? { ...s, data: { ...s.data, settings: data.settings } } : s));
+        }
+      } finally {
+        noticeSync.current.running = false;
+      }
+    },
+    [service],
+  );
+  const markNoticesReadCb = useCallback(
+    (ids: string[]) => {
+      if (!service || !ids.length) return;
+      void service.markNoticesRead(ids).then(async (changed) => {
+        if (!changed) return;
+        const data = await service.loadSnapshot();
+        setState((s) => (s.status === 'ready' ? { ...s, data: { ...s.data, settings: data.settings } } : s));
+      });
+    },
+    [service],
+  );
+
   const run = useCallback(
     async <T,>(action: (s: WorkCoreService) => Promise<T>, successMessage?: string | ((r: T) => string), opts?: RunOptions<T>): Promise<T> => {
       if (!service) throw new AppError('データの読み込み中です');
@@ -163,6 +211,11 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     if (state.status !== 'ready') return null;
     const today = state.service.today();
     const stock = computeAllStock(state.data.items, state.data);
+    const settings = readAutomationSettings(state.data);
+    // 無効にした自動化は判定しない。自動実行の自動化は、承認が必要な操作を含む提案だけを一覧に残す
+    const proposals = pendingProposals(ALL_AUTOMATIONS, { data: state.data, today, stock }, (id) => ruleSetting(ALL_AUTOMATIONS.find((d) => d.id === id)!, settings).enabled);
+    const notices = deriveNotices({ data: state.data, today, stock, proposals });
+    const noticeState = readNoticeState(state.data);
     return {
       service: state.service,
       data: state.data,
@@ -170,18 +223,23 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       helpdeskStats: computeHelpdeskStats(state.data.inquiries, state.data.inquiryCategories, today),
       stock,
       inventoryStats: computeInventoryStats(state.data, today),
-      proposals: (() => {
-        const settings = readAutomationSettings(state.data);
-        // 無効にした自動化は判定しない。自動実行の自動化は、承認が必要な操作を含む提案だけを一覧に残す
-        return pendingProposals(ALL_AUTOMATIONS, { data: state.data, today, stock }, (id) => ruleSetting(ALL_AUTOMATIONS.find((d) => d.id === id)!, settings).enabled);
-      })(),
+      proposals,
+      notices,
+      noticeState,
+      unreadCount: notices.filter((n) => isUnread(noticeState, n.id)).length,
+      markNoticesRead: markNoticesReadCb,
       today,
       deptById: new Map(state.data.departments.map((d) => [d.id, d])),
       empById: new Map(state.data.employees.map((e) => [e.id, e])),
       run,
       reload,
     };
-  }, [state, run, reload]);
+  }, [state, run, reload, markNoticesReadCb]);
+
+  const currentNotices = value?.notices;
+  useEffect(() => {
+    if (currentNotices) void syncNotices(currentNotices);
+  }, [currentNotices, syncNotices]);
 
   if (state.status === 'loading')
     return (
