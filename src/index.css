@@ -1,0 +1,85 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Yu Gothic UI', Meiryo, system-ui, sans-serif;
+  --color-navy-50: #f1f5fb;
+  --color-navy-100: #e1e9f6;
+  --color-navy-200: #c3d3ec;
+  --color-navy-300: #94b1db;
+  --color-navy-400: #5f88c4;
+  --color-navy-500: #3d68aa;
+  --color-navy-600: #2c518e;
+  --color-navy-700: #234174;
+  --color-navy-800: #1b335d;
+  --color-navy-900: #13274d;
+  --color-navy-950: #0b1630;
+
+  /* グラフ用 (状態色)。凡例・件数ラベルを必ず併記する */
+  --color-chart-todo: #8e8c86;
+  --color-chart-progress: #2a78d6;
+  --color-chart-done: #1baf7a;
+  --color-chart-hold: #eda100;
+  --color-chart-bar: #3d68aa;
+
+  --animate-fade-in: fade-in 160ms ease-out;
+  --animate-slide-up: slide-up 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-toast-in: toast-in 200ms ease-out;
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes slide-up {
+    from { transform: translateY(24px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+  @keyframes toast-in {
+    from { transform: translateY(-8px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+}
+
+.dark {
+  --color-chart-todo: #8a8983;
+  --color-chart-progress: #3987e5;
+  --color-chart-done: #199e70;
+  --color-chart-hold: #c98500;
+  --color-chart-bar: #5f88c4;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased dark:bg-navy-950 dark:text-slate-100;
+    font-feature-settings: 'palt';
+  }
+  /* iOS Safari のフォーカス時ズームを防ぐため入力は16px以上 */
+  input, select, textarea {
+    font-size: 16px;
+  }
+  @media (min-width: 1024px) {
+    input, select, textarea { font-size: 14px; }
+  }
+}
+
+@utility pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+@utility pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+  }
+}
