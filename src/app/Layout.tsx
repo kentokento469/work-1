@@ -5,6 +5,7 @@ import {
   Sparkles,
   ClipboardList,
   Database,
+  FileText,
   Headset,
   Info,
   LayoutDashboard,
@@ -35,6 +36,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key: 'dashboard', href: '#/', label: 'ダッシュボード', icon: LayoutDashboard },
   { key: 'helpdesk', href: '#/helpdesk', label: 'ヘルプデスク', icon: Headset },
   { key: 'inventory', href: '#/inventory', label: '在庫・資産・購買', icon: Boxes },
+  { key: 'documents', href: '#/documents', label: '書類管理', icon: FileText },
   { key: 'tasks', href: '#/tasks', label: 'タスク管理', icon: ClipboardList },
   { key: 'automation', href: '#/automation', label: '自動化センター', icon: Sparkles },
   { key: 'employees', href: '#/employees', label: '社員管理', icon: Users },
@@ -50,10 +52,10 @@ const BOTTOM_ITEMS: (NavItem & { short: string; covers?: string[] })[] = [
   { key: 'helpdesk', href: '#/helpdesk', label: 'ヘルプデスク', short: '問い合わせ', icon: Headset },
   { key: 'inventory', href: '#/inventory', label: '在庫・資産・購買', short: '在庫', icon: Boxes },
   { key: 'tasks', href: '#/tasks', label: 'タスク管理', short: 'タスク', icon: ClipboardList },
-  { key: 'menu', href: '#/menu', label: 'メニュー', short: 'メニュー', icon: Menu, covers: ['menu', 'employees', 'onboarding', 'faq', 'data', 'settings', 'automation'] },
+  { key: 'menu', href: '#/menu', label: 'メニュー', short: 'メニュー', icon: Menu, covers: ['menu', 'employees', 'onboarding', 'faq', 'data', 'settings', 'automation', 'documents'] },
 ];
 
-const FUTURE_MODULES = ['請求書・領収書処理', 'ワークフロー（承認経路）'];
+const FUTURE_MODULES = ['ワークフロー（承認経路）'];
 
 function ThemeButton({ className }: { className?: string }) {
   const { mode, cycle } = useTheme();
@@ -100,7 +102,8 @@ export function DemoNotice({ compact }: { compact?: boolean }) {
 }
 
 export function Layout({ active, children }: { active: string; children: ReactNode }) {
-  const { stats, helpdeskStats, inventoryStats, proposals, today } = useAppData();
+  const { stats, helpdeskStats, inventoryStats, proposals, today, data } = useAppData();
+  const docsToReview = data.documents.filter((d) => !d.deletedAt && d.status === 'needs_review').length;
   const badge = (key: string) =>
     key === 'tasks'
       ? stats.overdueTaskCount
@@ -108,11 +111,15 @@ export function Layout({ active, children }: { active: string; children: ReactNo
         ? helpdeskStats.overdueCount + helpdeskStats.newCount
         : key === 'inventory'
           ? inventoryStats.shortageItems
-          : key === 'automation' || key === 'menu'
+          : key === 'automation'
             ? proposals.length
-            : 0;
+            : key === 'documents'
+              ? docsToReview
+              : key === 'menu'
+                ? proposals.length + docsToReview
+                : 0;
   const badgeLabel = (key: string) =>
-    ({ tasks: '期限超過のタスク', helpdesk: '新規・期限超過の問い合わせ', inventory: '在庫不足の品目', automation: '承認待ちの自動化提案', menu: '承認待ちの自動化提案' })[key] ?? '';
+    ({ tasks: '期限超過のタスク', helpdesk: '新規・期限超過の問い合わせ', inventory: '在庫不足の品目', automation: '承認待ちの自動化提案', documents: '確認待ちの書類', menu: '承認待ちの提案・確認待ちの書類' })[key] ?? '';
 
   return (
     <div className="min-h-dvh">

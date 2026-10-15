@@ -287,7 +287,7 @@ test('[Phase2] FAQ化・バックアップ復元・既存データ保持・iPhon
   const path = join(mkdtempSync(join(tmpdir(), 'workcore-e2e-')), 'backup.json');
   await dl.saveAs(path);
   const backup = JSON.parse(readFileSync(path, 'utf8'));
-  expect(backup.schemaVersion).toBe(3);
+  expect(backup.schemaVersion).toBe(4);
   expect(backup.data.inquiries.length).toBeGreaterThan(10);
   const [csv] = await Promise.all([page.waitForEvent('download'), page.getByTestId('export-inquiries').click()]);
   expect(readFileSync((await csv.path())!, 'utf8').charCodeAt(0)).toBe(0xfeff);

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { ArrowLeft, ClipboardList, Headset, Pencil, Plus, Trash2, UserX, Zap } from 'lucide-react';
 import { InquiryStatusBadge } from '../features/helpdesk/parts';
 import { EmployeeEquipmentCard } from '../features/inventory/RelatedEquipment';
+import { RelatedDocumentsCard } from '../features/documents/light';
 import { useAppData } from '../app/AppData';
 import { navigate } from '../app/router';
 import { daysUntilHire } from '../automation/onboardingEngine';
@@ -134,6 +135,7 @@ export function EmployeeDetailPage({ employeeId }: { employeeId: string }) {
       </Card>
 
       <EmployeeEquipmentCard employeeId={emp.id} />
+      <RelatedDocumentsCard filter={(d) => d.employeeId === emp.id} newHref={`#/documents/new?employee=${emp.id}`} title="関連書類（申請書など）" />
 
       <Card className="mt-4 overflow-hidden">
         <CardHeader

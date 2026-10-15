@@ -4,6 +4,8 @@ import {
   AlertTriangle,
   BarChart3,
   Boxes,
+  FilePlus2,
+  FileText,
   CalendarClock,
   ChevronRight,
   CircleCheckBig,
@@ -21,10 +23,18 @@ import { useAppData } from '../app/AppData';
 import { navigate } from '../app/router';
 import { formatDateJa, formatDateTimeJa } from '../domain/date';
 import { TASK_STATUS_LABEL, type ActivityCategory } from '../domain/types';
-import type { AttentionKind } from '../domain/analytics';
+import { STAFF_SEGMENTS, STAFF_SEGMENT_LABEL, type AttentionKind, type StaffSegment } from '../domain/analytics';
 import { formatHours } from '../domain/helpdesk/analytics';
 import { DemoGuide } from '../features/DemoGuide';
-import { HorizontalBarChart, ProgressBar, ProgressRing, StackedBar } from '../ui/charts';
+import { ProgressBar, ProgressRing, SegmentedBarRows, StackedBar } from '../ui/charts';
+
+const STAFF_COLOR: Record<StaffSegment, string> = {
+  active: 'var(--color-staff-active)',
+  joining_scheduled: 'var(--color-staff-joining)',
+  leaving_scheduled: 'var(--color-staff-leaving)',
+  leave_absence: 'var(--color-staff-leave)',
+  retired: 'var(--color-staff-retired)',
+};
 import { Badge, Card, CardHeader, EmptyState, PageHeader, cx } from '../ui/primitives';
 import { DEMO_COMPANY_NAME } from '../demo/demoData';
 
@@ -105,6 +115,7 @@ const CATEGORY_LABEL: Record<ActivityCategory, string> = {
   asset: '資産',
   purchase: '購買',
   automation: '自動化',
+  document: '書類',
 };
 
 export function DashboardPage() {
@@ -144,6 +155,7 @@ export function DashboardPage() {
 
       <HelpdeskSummary />
       <InventorySummary />
+      <DocumentsSummary />
 
       <div className="mt-4 grid gap-4 lg:grid-cols-5">
         <Card className="lg:col-span-3">
@@ -219,12 +231,14 @@ export function DashboardPage() {
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <Card>
-          <CardHeader title="部署別社員数" icon={BarChart3} description="退職者を除く（タップで社員一覧へ）" />
-          <div className="px-3 pb-4 pt-3 sm:px-4">
-            <HorizontalBarChart
+          <CardHeader title="部署別社員数" icon={BarChart3} description="在籍状況の内訳。右の数字は在籍人数（在籍中＋退職予定＋休職中）。タップで社員一覧へ" />
+          <div className="px-2 pb-3 pt-2 sm:px-3" data-testid="department-breakdown">
+            <SegmentedBarRows
               unit="名"
+              primaryLabel="在籍"
               onSelect={(k) => navigate(`/employees?dept=${k}`)}
-              data={s.departmentCounts.map((d) => ({ key: d.departmentId, label: d.name, value: d.count }))}
+              segments={STAFF_SEGMENTS.map((k) => ({ key: k, label: STAFF_SEGMENT_LABEL[k], color: STAFF_COLOR[k] }))}
+              rows={s.departmentBreakdown.map((d) => ({ key: d.departmentId, label: d.name, values: d.counts, primary: d.enrolled }))}
             />
           </div>
         </Card>
@@ -390,6 +404,44 @@ function InventorySummary() {
             <p className={cx('mt-0.5 text-xl font-bold tabular-nums text-slate-900 dark:text-white', k.tone)}>
               {k.value}
               <span className="ml-0.5 text-xs font-normal text-slate-400">{i === 4 ? '台' : '件'}</span>
+            </p>
+          </a>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+/** 書類の要約: 確認待ち・今月の確認済み・在庫に未反映の納品書 */
+function DocumentsSummary() {
+  const { data, today } = useAppData();
+  const docs = data.documents.filter((d) => !d.deletedAt);
+  const month = today.slice(0, 7);
+  const items = [
+    { label: '確認待ち', value: docs.filter((d) => d.status === 'needs_review').length, href: '#/documents?status=needs_review', tone: 'text-amber-700 dark:text-amber-400' },
+    { label: '今月の確認済み', value: docs.filter((d) => d.status !== 'needs_review' && d.updatedAt.slice(0, 7) === month).length, href: '#/documents?status=confirmed', tone: '' },
+    { label: '在庫未反映の納品書', value: docs.filter((d) => d.type === 'delivery' && d.status === 'confirmed' && !d.inventory && d.lines.length > 0).length, href: '#/documents?status=confirmed&type=delivery', tone: '' },
+  ];
+  return (
+    <Card className="mt-4">
+      <CardHeader
+        title="書類"
+        icon={FileText}
+        description={`登録 ${docs.length}件（請求書・領収書・納品書など）`}
+        action={
+          <a href="#/documents/new" className="inline-flex min-h-9 items-center gap-1 py-1 text-xs font-semibold text-navy-600 dark:text-navy-300" data-testid="dash-import-document">
+            <FilePlus2 className="size-3.5" aria-hidden />
+            取り込む
+          </a>
+        }
+      />
+      <div className="grid grid-cols-3 gap-2 p-3 sm:p-4" data-testid="documents-summary">
+        {items.map((k) => (
+          <a key={k.label} href={k.href} className="rounded-xl bg-slate-50 px-3 py-2.5 transition-colors hover:bg-slate-100 dark:bg-navy-950 dark:hover:bg-navy-800">
+            <p className="text-[11px] font-semibold leading-tight text-slate-500">{k.label}</p>
+            <p className={cx('mt-0.5 text-xl font-bold tabular-nums text-slate-900 dark:text-white', k.value > 0 && k.tone)}>
+              {k.value}
+              <span className="ml-0.5 text-xs font-normal text-slate-400">件</span>
             </p>
           </a>
         ))}

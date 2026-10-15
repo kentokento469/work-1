@@ -43,8 +43,56 @@ export interface DashboardStats {
   completionRate: number; // 0-100
   statusCounts: Record<TaskStatus, number>;
   departmentCounts: { departmentId: string; name: string; count: number }[];
+  /** 部署別の在籍状況の内訳 (人員の構成と変動を見るため。退職済みも含む) */
+  departmentBreakdown: DepartmentBreakdown[];
   hireProgress: { employee: Employee; total: number; done: number; daysUntil: number }[];
   attention: AttentionItem[];
+}
+
+/** 部署別グラフの区分。社員ステータスと退職日から決める */
+export const STAFF_SEGMENTS = ['active', 'leaving_scheduled', 'leave_absence', 'joining_scheduled', 'retired'] as const;
+export type StaffSegment = (typeof STAFF_SEGMENTS)[number];
+export const STAFF_SEGMENT_LABEL: Record<StaffSegment, string> = {
+  active: '在籍中',
+  leaving_scheduled: '退職予定',
+  leave_absence: '休職中',
+  joining_scheduled: '入社予定',
+  retired: '退職済',
+};
+
+export interface DepartmentBreakdown {
+  departmentId: string;
+  name: string;
+  counts: Record<StaffSegment, number>;
+  /** 在籍人数 = 在籍中 + 退職予定 + 休職中 (現に所属している人数) */
+  enrolled: number;
+  total: number;
+}
+
+/**
+ * 社員1人の区分。
+ * - 入社予定: ステータス「入社予定」
+ * - 退職済: ステータス「退職」
+ * - 退職予定: 在籍・休職で、退職日が今日以降に設定されている (まだ在籍している)
+ * - 休職中: ステータス「休職」(退職日の予定なし)
+ * - 在籍中: ステータス「在籍」(退職日の予定なし)
+ */
+export function staffSegment(e: Employee, todayISO: ISODate): StaffSegment {
+  if (e.status === 'pending') return 'joining_scheduled';
+  if (e.status === 'retired') return 'retired';
+  if (e.retireDate && e.retireDate >= todayISO) return 'leaving_scheduled';
+  return e.status === 'leave' ? 'leave_absence' : 'active';
+}
+
+export function computeDepartmentBreakdown(employees: Employee[], departments: DataSnapshot['departments'], todayISO: ISODate): DepartmentBreakdown[] {
+  return [...departments]
+    .sort((a, b) => a.order - b.order)
+    .map((d) => {
+      const counts = Object.fromEntries(STAFF_SEGMENTS.map((k) => [k, 0])) as Record<StaffSegment, number>;
+      for (const e of employees) if (e.departmentId === d.id) counts[staffSegment(e, todayISO)]++;
+      const enrolled = counts.active + counts.leaving_scheduled + counts.leave_absence;
+      return { departmentId: d.id, name: d.name, counts, enrolled, total: enrolled + counts.joining_scheduled + counts.retired };
+    });
 }
 
 export function computeDashboard(data: DataSnapshot, todayISO: ISODate): DashboardStats {
@@ -136,6 +184,7 @@ export function computeDashboard(data: DataSnapshot, todayISO: ISODate): Dashboa
     completionRate: totalTaskCount === 0 ? 0 : Math.round((doneTaskCount / totalTaskCount) * 100),
     statusCounts,
     departmentCounts,
+    departmentBreakdown: computeDepartmentBreakdown(employees, departments, todayISO),
     hireProgress,
     attention,
   };

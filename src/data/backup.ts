@@ -5,10 +5,16 @@
  * 互換性: schemaVersion 1 (Phase 1)・2 (Phase 2) のバックアップも読み込める。
  *   - v1: ヘルプデスク関連データは空、カテゴリは初期値で補う。タスクに inquiryId: null を補う
  *   - v1/v2: 在庫・資産・購買は空 (保管場所・仕入先は初期マスタ) で補う
+ *   - v1〜v3: 書類は空で補う
+ *
+ * v4 (Phase 4) から、書類の元ファイルを files に Base64 で含められる (任意)。
+ * 復元前に各ファイルの SHA-256 を計算し、書類に記録したハッシュと一致するかを検証する。
  */
 import { isValidISODate } from '../domain/date';
 import { createDefaultInquiryCategories } from '../domain/helpdesk/defaults';
 import { emptyInventory } from '../domain/inventory/defaults';
+import { DOCUMENT_STATUSES, DOCUMENT_TYPES, EXTRACTION_METHODS, FIELD_KEYS, type DocumentFile } from '../domain/documents/types';
+import { sha256Hex } from '../domain/documents/hash';
 import { ASSET_STATUSES, INVENTORY_CATEGORIES, MOVEMENT_TYPES, PO_STATUSES } from '../domain/inventory/types';
 import { isEmployeeStatus, isEmploymentType, isPriority, isTaskStatus, normalizeEmployeeNumber } from '../domain/validation';
 import {
@@ -25,18 +31,72 @@ import {
 } from '../domain/types';
 
 export const BACKUP_APP_ID = 'WorkCore';
-export const BACKUP_SCHEMA_VERSION = 3;
-const SUPPORTED_VERSIONS = [1, 2, 3];
+export const BACKUP_SCHEMA_VERSION = 4;
+const SUPPORTED_VERSIONS = [1, 2, 3, 4];
+
+/** 書類の元ファイル (Base64)。バックアップに含めるかは出力時に選べる */
+export interface BackupDocumentFile {
+  id: string;
+  documentId: string;
+  name: string;
+  mime: string;
+  size: number;
+  hash: string;
+  createdAt: string;
+  base64: string;
+}
 
 export interface BackupFile {
   app: typeof BACKUP_APP_ID;
   schemaVersion: number;
   exportedAt: string;
   data: DataSnapshot;
+  files?: BackupDocumentFile[];
 }
 
-export function createBackup(data: DataSnapshot, now = new Date()): BackupFile {
-  return { app: BACKUP_APP_ID, schemaVersion: BACKUP_SCHEMA_VERSION, exportedAt: now.toISOString(), data };
+export function createBackup(data: DataSnapshot, now = new Date(), files?: DocumentFile[]): BackupFile {
+  const b: BackupFile = { app: BACKUP_APP_ID, schemaVersion: BACKUP_SCHEMA_VERSION, exportedAt: now.toISOString(), data };
+  if (files) b.files = files.map(({ data: buf, ...meta }) => ({ ...meta, base64: bufferToBase64(buf) }));
+  return b;
+}
+
+export function bufferToBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf);
+  let bin = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  return btoa(bin);
+}
+
+export function base64ToBuffer(b64: string): ArrayBuffer | null {
+  try {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes.buffer;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 元ファイルを復号し、サイズとハッシュを検証する (非同期)。
+ * 1件でも一致しなければ復元しない (壊れたファイルを書類に結び付けない)
+ */
+export async function decodeBackupFiles(backup: BackupFile): Promise<{ ok: true; files: DocumentFile[] } | { ok: false; errors: string[] }> {
+  const errors: string[] = [];
+  const files: DocumentFile[] = [];
+  for (const f of backup.files ?? []) {
+    const buf = base64ToBuffer(f.base64);
+    if (!buf) {
+      errors.push(`元ファイル「${f.name}」を復号できません`);
+      continue;
+    }
+    if (buf.byteLength !== f.size) errors.push(`元ファイル「${f.name}」のサイズが記録と一致しません`);
+    else if ((await sha256Hex(buf)) !== f.hash) errors.push(`元ファイル「${f.name}」の内容が記録（ハッシュ）と一致しません。ファイルが破損している可能性があります`);
+    else files.push({ id: f.id, documentId: f.documentId, name: f.name, mime: f.mime, size: f.size, hash: f.hash, createdAt: f.createdAt, data: buf });
+  }
+  return errors.length ? { ok: false, errors: errors.slice(0, 10) } : { ok: true, files };
 }
 
 export type BackupValidation =
@@ -212,6 +272,16 @@ const checkPo = (v: unknown) =>
 const checkEquipmentRule = (v: unknown) => isObj(v) && isStr(v.id) && isStr(v.scope) && isStr(v.itemId) && isInt(v.quantity) && v.quantity > 0 && typeof v.enabled === 'boolean' && isNum(v.order);
 const checkRun = (v: unknown) => isObj(v) && isStr(v.id) && isStr(v.automationId) && isStr(v.key) && isStr(v.status) && isStr(v.title) && isStrArr(v.results) && isStrOrNull(v.error) && isStr(v.at);
 
+const isStrRecord = (v: unknown) => isObj(v) && Object.entries(v).every(([k, x]) => (FIELD_KEYS as readonly string[]).includes(k) && isStr(x));
+const checkDocument = (v: unknown) =>
+  isObj(v) && isStr(v.id) && isStr(v.number) && oneOf(DOCUMENT_TYPES)(v.type) && oneOf(DOCUMENT_STATUSES)(v.status) && oneOf(EXTRACTION_METHODS)(v.method) &&
+  isStrRecord(v.fields) && isObj(v.extracted) && isStrArr(v.reviewed) && Array.isArray(v.lines) &&
+  v.lines.every((l) => isObj(l) && isStr(l.id) && isStr(l.name) && isNumOrNull(l.quantity) && isNumOrNull(l.unitPrice) && isNumOrNull(l.amount) && isStrOrNull(l.itemId)) &&
+  Array.isArray(v.taxLines) && Array.isArray(v.pages) && v.pages.every((p) => isObj(p) && isInt(p.page) && isStr(p.text)) &&
+  (v.file === null || (isObj(v.file) && isStr(v.file.fileId) && isStr(v.file.name) && isStr(v.file.mime) && isInt(v.file.size) && isStr(v.file.hash) && isInt(v.file.pageCount))) &&
+  isStrOrNull(v.employeeId) && isStrOrNull(v.inquiryId) && isStrOrNull(v.purchaseOrderId) && isStrOrNull(v.supplierId) && isStrArr(v.notDuplicateOf) &&
+  Array.isArray(v.history) && isStr(v.createdAt) && isStr(v.updatedAt) && isStrOrNull(v.deletedAt);
+
 const MAX_ERRORS = 10;
 
 export function validateBackup(raw: unknown): BackupValidation {
@@ -232,6 +302,8 @@ export function validateBackup(raw: unknown): BackupValidation {
   }
   // v1/v2 → v3 の補完 (在庫・資産・購買は空、保管場所・仕入先は初期マスタ)
   if (version < 3) Object.assign(d, emptyInventory(true));
+  // v1〜v3 → v4 の補完 (書類は空)
+  if (version < 4) d.documents = [];
 
   const collections = [
     ['departments', '部署', checkDepartment],
@@ -254,6 +326,7 @@ export function validateBackup(raw: unknown): BackupValidation {
     ['purchaseOrders', '発注書', checkPo],
     ['equipmentRules', '入社時の必要機器ルール', checkEquipmentRule],
     ['automationRuns', '自動化の処理履歴', checkRun],
+    ['documents', '書類', checkDocument],
   ] as const;
 
   for (const [key, label, check] of collections) {
@@ -342,6 +415,37 @@ export function validateBackup(raw: unknown): BackupValidation {
   for (const l of data.stockLevels) levelSum.set(l.itemId, (levelSum.get(l.itemId) ?? 0) + l.quantity);
   for (const i of data.items.filter((x) => x.tracking === 'quantity'))
     if ((ledger.get(i.id) ?? 0) !== (levelSum.get(i.id) ?? 0)) errors.push(`品目「${i.name}」の在庫数と入出庫履歴の合計が一致しません`);
+
+  // 書類の参照整合性
+  const poIds = new Set(data.purchaseOrders.map((p) => p.id));
+  const docNums = new Set<string>();
+  const docIds = new Set(data.documents.map((x) => x.id));
+  for (const doc of data.documents) {
+    if (docNums.has(doc.number)) errors.push(`書類ID「${doc.number}」が重複しています`);
+    docNums.add(doc.number);
+    if (doc.employeeId && !empIds.has(doc.employeeId)) errors.push(`書類「${doc.number}」の関連社員が存在しません`);
+    if (doc.inquiryId && !inqIds.has(doc.inquiryId)) errors.push(`書類「${doc.number}」の関連問い合わせが存在しません`);
+    if (doc.purchaseOrderId && !poIds.has(doc.purchaseOrderId)) errors.push(`書類「${doc.number}」の関連発注書が存在しません`);
+    if (doc.lines.some((l) => l.itemId && !itemIds.has(l.itemId))) errors.push(`書類「${doc.number}」の明細に存在しない品目があります`);
+  }
+  const files = raw.files;
+  let backupFiles: BackupDocumentFile[] | undefined;
+  if (files !== undefined) {
+    if (!Array.isArray(files)) errors.push('元ファイル（files）の形式が不正です');
+    else {
+      backupFiles = [];
+      files.forEach((f: unknown, i) => {
+        if (!(isObj(f) && isStr(f.id) && isStr(f.documentId) && isStr(f.name) && isStr(f.mime) && isInt(f.size) && isStr(f.hash) && isStr(f.base64) && isStr(f.createdAt)))
+          errors.push(`元ファイル ${i + 1}件目の形式が不正です`);
+        else if (!docIds.has(f.documentId)) errors.push(`元ファイル「${f.name}」の書類が存在しません`);
+        else backupFiles!.push(f as unknown as BackupDocumentFile);
+      });
+      for (const f of backupFiles) {
+        const doc = data.documents.find((x) => x.id === f.documentId)!;
+        if (!doc.file || doc.file.fileId !== f.id || doc.file.hash !== f.hash) errors.push(`元ファイル「${f.name}」が書類「${doc.number}」の記録と一致しません`);
+      }
+    }
+  }
   if (errors.length) return { ok: false, errors: errors.slice(0, MAX_ERRORS) };
 
   const backup: BackupFile = {
@@ -353,6 +457,7 @@ export function validateBackup(raw: unknown): BackupValidation {
       // 社員番号は正規化して保存 (DBの一意インデックスと整合させる)
       employees: data.employees.map((e) => ({ ...e, employeeNumber: normalizeEmployeeNumber(e.employeeNumber) })),
     },
+    ...(backupFiles ? { files: backupFiles } : {}),
   };
   const counts = Object.fromEntries(Object.entries(backup.data).map(([k, v]) => [k, (v as unknown[]).length])) as Record<keyof DataSnapshot, number>;
   return { ok: true, backup, counts, sourceVersion: version };

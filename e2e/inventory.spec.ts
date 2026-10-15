@@ -356,7 +356,7 @@ test('[Phase3] バックアップ・復元・再読み込み後の整合性・iP
   const path = join(mkdtempSync(join(tmpdir(), 'workcore-e2e-')), 'backup.json');
   await dl.saveAs(path);
   const backup = JSON.parse(readFileSync(path, 'utf8'));
-  expect(backup.schemaVersion).toBe(3);
+  expect(backup.schemaVersion).toBe(4);
   expect(backup.data.stockMovements.length).toBe(counts.movements);
   expect(backup.data.assets.length).toBe(counts.assets);
   for (const id of ['export-items', 'export-movements', 'export-assets']) {

@@ -257,6 +257,7 @@ export function createDemoData(today: ISODate): DataSnapshot {
 
   return {
     ...inventory,
+    documents: [],
     departments,
     employees,
     tasks: [...tasks, ...helpdesk.tasks],

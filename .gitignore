@@ -152,3 +152,6 @@ vite.config.ts.timestamp-*
 dist/
 test-results/
 playwright-report/
+
+# OCR・PDF処理の配信ファイル (scripts/copy-ocr-assets.mjs が node_modules から生成)
+public/vendor/

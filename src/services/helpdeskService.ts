@@ -48,6 +48,7 @@ export interface TaskProposalOverride {
 export interface DeletedInquiry {
   inquiry: Inquiry;
   unlinkedTaskIds: string[];
+  unlinkedDocumentIds?: string[];
 }
 
 function secretError(field: string, text: string): AppError | null {
@@ -269,21 +270,28 @@ export class HelpdeskService {
 
   /** 削除。関連タスクは残し、紐付けだけ外す (タスクは業務記録のため)。戻り値は Undo 用 */
   async deleteInquiry(id: string): Promise<DeletedInquiry> {
-    const tx = this.db.transaction(['inquiries', 'tasks', 'activities'], 'readwrite');
+    const tx = this.db.transaction(['inquiries', 'tasks', 'activities', 'documents'], 'readwrite');
     const inquiry = await tx.objectStore('inquiries').get(id);
     if (!inquiry) return abortWith(tx, '対象の問い合わせが見つかりません');
     const tasks = await tx.objectStore('tasks').index('byInquiry').getAll(id);
     for (const t of tasks) await tx.objectStore('tasks').put({ ...t, inquiryId: null, updatedAt: nowISO() });
+    // 関連書類は削除せず、関連付けだけを外す
+    const docs = (await tx.objectStore('documents').getAll()).filter((d) => d.inquiryId === id);
+    for (const d of docs) await tx.objectStore('documents').put({ ...d, inquiryId: null, updatedAt: nowISO() });
     await tx.objectStore('inquiries').delete(id);
     await logActivity(tx, 'inquiry', 'delete', `問い合わせ ${inquiry.number} を削除しました`, id);
     await tx.done;
-    return { inquiry, unlinkedTaskIds: tasks.map((t) => t.id) };
+    return { inquiry, unlinkedTaskIds: tasks.map((t) => t.id), unlinkedDocumentIds: docs.map((d) => d.id) };
   }
 
   async restoreInquiry(deleted: DeletedInquiry): Promise<void> {
-    const tx = this.db.transaction(['inquiries', 'tasks', 'activities'], 'readwrite');
+    const tx = this.db.transaction(['inquiries', 'tasks', 'activities', 'documents'], 'readwrite');
     if (await tx.objectStore('inquiries').index('byNumber').get(deleted.inquiry.number)) return abortWith(tx, '同じ番号の問い合わせが既に存在します');
     await tx.objectStore('inquiries').put(deleted.inquiry);
+    for (const did of deleted.unlinkedDocumentIds ?? []) {
+      const d = await tx.objectStore('documents').get(did);
+      if (d && d.inquiryId === null) await tx.objectStore('documents').put({ ...d, inquiryId: deleted.inquiry.id });
+    }
     for (const tid of deleted.unlinkedTaskIds) {
       const t = await tx.objectStore('tasks').get(tid);
       if (t && t.inquiryId === null) await tx.objectStore('tasks').put({ ...t, inquiryId: deleted.inquiry.id });

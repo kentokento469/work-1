@@ -3,9 +3,11 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "WorkCore - 中小企業向け統合業務管理・自動化Webアプリ (Phase 1)",
+  "description": "WorkCore - 中小企業向け統合業務管理・自動化Webアプリ",
   "scripts": {
+    "predev": "node scripts/copy-ocr-assets.mjs",
     "dev": "vite",
+    "prebuild": "node scripts/copy-ocr-assets.mjs",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
@@ -14,10 +16,14 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@tesseract.js-data/eng": "1.0.0",
+    "@tesseract.js-data/jpn": "1.0.0",
     "idb": "^8.0.0",
     "lucide-react": "^0.460.0",
+    "pdfjs-dist": "5.4.624",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "tesseract.js": "7.0.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.56.1",

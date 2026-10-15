@@ -1,5 +1,5 @@
 /** スマホ用メニュー (下部ナビに入りきらない画面への入口) */
-import { BookOpen, ChevronRight, Database, Settings, Sparkles, UserPlus, Users, type LucideIcon } from 'lucide-react';
+import { BookOpen, ChevronRight, Database, FileText, Settings, Sparkles, UserPlus, Users, type LucideIcon } from 'lucide-react';
 import { useAppData } from '../app/AppData';
 import { DemoNotice } from '../app/Layout';
 import { DEMO_COMPANY_NAME } from '../demo/demoData';
@@ -7,7 +7,9 @@ import { Card, PageHeader } from '../ui/primitives';
 
 export function MenuPage() {
   const { stats, data, proposals } = useAppData();
+  const toReview = data.documents.filter((d) => !d.deletedAt && d.status === 'needs_review').length;
   const items: { href: string; label: string; desc: string; icon: LucideIcon }[] = [
+    { href: '#/documents', label: '書類管理', desc: `確認待ち ${toReview}件・請求書/領収書/納品書の取り込み・OCR`, icon: FileText },
     { href: '#/automation', label: '自動化センター', desc: `承認待ちの提案 ${proposals.length}件・実行条件と処理履歴`, icon: Sparkles },
     { href: '#/employees', label: '社員管理', desc: `登録 ${data.employees.length}名・貸与機器・問い合わせ`, icon: Users },
     { href: '#/onboarding', label: '入社準備', desc: `入社予定 ${stats.pendingHireCount}名・タスク自動生成とルール設定`, icon: UserPlus },
@@ -39,7 +41,7 @@ export function MenuPage() {
       <Card className="mt-4 p-4">
         <p className="mb-1 text-sm font-semibold">{DEMO_COMPANY_NAME}（架空）</p>
         <DemoNotice />
-        <p className="mt-2 text-xs text-slate-400">WorkCore Phase 3（在庫・資産・購買）・今後：請求書処理／承認ワークフロー</p>
+        <p className="mt-2 text-xs text-slate-400">WorkCore Phase 4（書類処理・OCR・CSV）・今後：承認ワークフロー</p>
       </Card>
     </>
   );

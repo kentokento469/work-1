@@ -17,6 +17,8 @@ import { createDemoData, createHelpdeskDemoData } from '../demo/demoData';
 import { createDefaultInquiryCategories } from '../domain/helpdesk/defaults';
 import { AppError, abortWith, appendInquiryEvent, fieldError, inquiryEvent, logActivity, type WriteTx } from './common';
 import { HelpdeskService } from './helpdeskService';
+import { DocumentService } from './documentService';
+import type { DocumentFile } from '../domain/documents/types';
 
 export { AppError } from './common';
 
@@ -24,15 +26,19 @@ export { AppError } from './common';
 export interface DeletedEmployee {
   employee: Employee;
   tasks: Task[];
+  /** 関連付けを外した書類 (取り消し時に戻す) */
+  unlinkedDocumentIds?: string[];
 }
 
 export class WorkCoreService {
   readonly helpdesk: HelpdeskService;
   readonly inventory: InventoryService;
+  readonly documents: DocumentService;
 
   constructor(private readonly db: WorkCoreDB, private readonly clock: () => string = todayISO) {
     this.helpdesk = new HelpdeskService(db, clock);
     this.inventory = new InventoryService(db, clock);
+    this.documents = new DocumentService(db, clock, this.inventory);
   }
 
   today(): string {
@@ -58,6 +64,7 @@ export class WorkCoreService {
     data.locations.sort((a, b) => a.order - b.order);
     data.equipmentRules.sort((a, b) => a.order - b.order);
     data.automationRuns.sort((a, b) => b.at.localeCompare(a.at));
+    data.documents.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     return data;
   }
 
@@ -126,7 +133,7 @@ export class WorkCoreService {
    * 戻り値は Undo 用。
    */
   async deleteEmployee(id: string): Promise<DeletedEmployee> {
-    const tx = this.db.transaction(['employees', 'tasks', 'activities', 'assets', 'reservations'], 'readwrite');
+    const tx = this.db.transaction(['employees', 'tasks', 'activities', 'assets', 'reservations', 'documents'], 'readwrite');
     const employee = await tx.objectStore('employees').get(id);
     if (!employee) return abortWith(tx, '対象の社員が見つかりません');
     // 貸与中・予約中の機器がある社員を削除すると、資産の利用者が不明になるため拒否する
@@ -137,19 +144,26 @@ export class WorkCoreService {
       return abortWith(tx, `貸与中・予約中の機器があるため削除できません（資産${holding}台・予約${reserving}件）。返却または予約解除をしてから削除するか、ステータスを「退職」にしてください`);
     const tasks = await tx.objectStore('tasks').index('byEmployee').getAll(id);
     for (const t of tasks) await tx.objectStore('tasks').delete(t.id);
+    // 書類は業務記録なので削除せず、社員との関連付けだけを外す
+    const docs = (await tx.objectStore('documents').getAll()).filter((d) => d.employeeId === id);
+    for (const d of docs) await tx.objectStore('documents').put({ ...d, employeeId: null, updatedAt: nowISO(), history: [...d.history, { at: nowISO(), message: `関連社員「${employee.name}」の削除により関連付けを解除` }] });
     await tx.objectStore('employees').delete(id);
-    await logActivity(tx, 'employee', 'delete', `社員「${employee.name}」を削除しました（関連タスク${tasks.length}件も削除）`, id);
+    await logActivity(tx, 'employee', 'delete', `社員「${employee.name}」を削除しました（関連タスク${tasks.length}件も削除${docs.length ? `・書類${docs.length}件の関連付けを解除` : ''}）`, id);
     await tx.done;
-    return { employee, tasks };
+    return { employee, tasks, unlinkedDocumentIds: docs.map((d) => d.id) };
   }
 
   /** deleteEmployee の取り消し。社員番号が他で使われていた場合は復元しない */
   async restoreEmployee(deleted: DeletedEmployee): Promise<void> {
-    const tx = this.db.transaction(['employees', 'tasks', 'activities'], 'readwrite');
+    const tx = this.db.transaction(['employees', 'tasks', 'activities', 'documents'], 'readwrite');
     const dup = await tx.objectStore('employees').index('byNumber').get(deleted.employee.employeeNumber);
     if (dup) return abortWith(tx, `社員番号「${deleted.employee.employeeNumber}」が既に使われているため元に戻せません`);
     await tx.objectStore('employees').put(deleted.employee);
     for (const t of deleted.tasks) await tx.objectStore('tasks').put(t);
+    for (const did of deleted.unlinkedDocumentIds ?? []) {
+      const d = await tx.objectStore('documents').get(did);
+      if (d && d.employeeId === null) await tx.objectStore('documents').put({ ...d, employeeId: deleted.employee.id });
+    }
     await logActivity(tx, 'employee', 'restore', `社員「${deleted.employee.name}」の削除を取り消しました`, deleted.employee.id);
     await tx.done;
   }
@@ -411,7 +425,7 @@ export class WorkCoreService {
 
   // ---------- データ管理 ----------
 
-  private async replaceAll(data: DataSnapshot, message: string): Promise<void> {
+  private async replaceAll(data: DataSnapshot, message: string, files: DocumentFile[] = []): Promise<void> {
     const tx = this.db.transaction([...STORE_NAMES], 'readwrite');
     // 二重送信防止キー (meta の req:*) も含めて全消去する
     await Promise.all(STORE_NAMES.map((s) => tx.objectStore(s).clear()));
@@ -419,13 +433,27 @@ export class WorkCoreService {
       const store = tx.objectStore(name);
       for (const rec of data[name] as { id: string }[]) await store.put(rec as never);
     }
+    for (const f of files) await tx.objectStore('documentFiles').put(f);
     await tx.objectStore('meta').put({ key: 'initialized', value: nowISO() });
     await logActivity(tx, 'data', 'replace', message);
     await tx.done;
   }
 
-  async restoreBackup(backup: BackupFile): Promise<void> {
-    await this.replaceAll(backup.data, `バックアップ（${backup.exportedAt.slice(0, 10) || '日付不明'}）から復元しました`);
+  /**
+   * バックアップから復元。元ファイルは decodeBackupFiles() で検証済みのものを渡す。
+   * 元ファイルを含まないバックアップでは、書類の抽出結果だけが復元され、原本は「なし」と表示される
+   */
+  async restoreBackup(backup: BackupFile, files: DocumentFile[] = []): Promise<void> {
+    await this.replaceAll(
+      backup.data,
+      `バックアップ（${backup.exportedAt.slice(0, 10) || '日付不明'}）から復元しました${backup.data.documents.length ? `（書類${backup.data.documents.length}件・元ファイル${files.length}件）` : ''}`,
+      files,
+    );
+  }
+
+  /** バックアップ用に元ファイル本体をすべて読む (ゴミ箱の書類も含む) */
+  async loadAllDocumentFiles(): Promise<DocumentFile[]> {
+    return this.db.getAll('documentFiles');
   }
 
   async resetDemoData(): Promise<void> {
@@ -438,6 +466,7 @@ export class WorkCoreService {
     await this.replaceAll(
       {
         ...emptyInventory(true),
+        documents: [],
         departments: demo.departments,
         rules: demo.rules,
         employees: [],

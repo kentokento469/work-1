@@ -4,7 +4,7 @@
  * - 確定前に「変更後の在庫」を表示 (結果のプレビュー)
  * - シートを開くたびに requestId を発行し、連打・再送でも1回だけ処理する
  */
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useState, type FormEvent } from 'react';
 import { ArrowDownToLine, ArrowRightLeft, ArrowUpFromLine, Save, SlidersHorizontal, UserCheck, Undo2 } from 'lucide-react';
 import { useAppData } from '../../app/AppData';
 import { generateId } from '../../domain/id';
@@ -50,7 +50,8 @@ export function QuantitySheet({ item, mode, onClose }: { item: Item | null; mode
   const [error, setError] = useState<string | null>(null);
   const [requestId, setRequestId] = useState(() => generateId('req'));
 
-  useEffect(() => {
+  // 開いた直後の初期化は描画前に行う (表示された直後に入力した値が後から上書きされないように)
+  useLayoutEffect(() => {
     if (!open) return;
     const l = defaultLoc();
     setLoc(l);
@@ -197,7 +198,7 @@ export function AssignSheet({ asset, onClose }: { asset: Asset | null; onClose: 
   const [employeeId, setEmployeeId] = useState('');
   const [busy, setBusy] = useState(false);
   const [requestId, setRequestId] = useState(() => generateId('req'));
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (asset) {
       setEmployeeId(asset.status === 'reserved' ? (asset.assigneeId ?? '') : '');
       setRequestId(generateId('req'));
@@ -259,7 +260,7 @@ export function ReturnSheet({ asset, onClose }: { asset: Asset | null; onClose: 
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [requestId, setRequestId] = useState(() => generateId('req'));
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (asset) {
       setCondition('unused');
       setNote('');

@@ -189,3 +189,23 @@ test('[Phase1] ナビゲーション・テーマ切替・入力エラー表示',
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);
 });
+
+test('[Dashboard] 部署別社員数：在籍状況の積み上げバー・凡例・内訳（タップで社員一覧へ）', async ({ page }) => {
+  await page.goto('/');
+  const card = page.getByTestId('department-breakdown');
+  await expect(card).toBeVisible();
+  const legend = card.getByTestId('segment-legend');
+  for (const l of ['在籍中', '入社予定', '退職予定', '休職中', '退職済']) await expect(legend).toContainText(l);
+  // デモ: 営業部は 在籍中3・退職予定1・休職中1・入社予定1・退職済1、在籍人数は 3+1+1=5
+  const sales = card.getByRole('button', { name: /^営業部：/ });
+  await expect(sales).toContainText('在籍5名');
+  await expect(sales).toContainText('退職予定1');
+  await expect(sales).toContainText('退職済1');
+  await expect(sales).toHaveAttribute('aria-label', /営業部：在籍5名（在籍中3・退職予定1・休職中1・入社予定1・退職済1）/);
+  // 人数が少ない区分も見える幅で描画される (最小幅)
+  const widths = await sales.locator('span.h-full > span').evaluateAll((els) => els.map((e) => e.getBoundingClientRect().width));
+  expect(widths).toHaveLength(5);
+  expect(Math.min(...widths)).toBeGreaterThanOrEqual(6);
+  await sales.click();
+  await expect(page.getByRole('heading', { name: '社員管理' })).toBeVisible();
+});

@@ -1,6 +1,7 @@
 /**
  * 在庫の詳細画面: 品目詳細 / 資産詳細 / 発注書詳細 / 棚卸。
  */
+import { RelatedDocumentsCard } from '../../features/documents/light';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   ArrowDownToLine,
@@ -572,6 +573,7 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
           </Button>
         </div>
       </Card>
+      <RelatedDocumentsCard filter={(d) => d.purchaseOrderId === po.id} newHref={`#/documents/new?po=${po.id}&type=delivery`} title="関連書類（納品書・請求書）" />
       <Card className="mt-4">
         <CardHeader title="処理履歴" icon={History} />
         <ol className="space-y-2 px-4 pb-4 pt-2 text-sm sm:px-5">

@@ -1,11 +1,46 @@
 import { describe, expect, it } from 'vitest';
-import { computeDashboard } from './analytics';
+import { computeDashboard, computeDepartmentBreakdown, staffSegment } from './analytics';
 import { emptyInventory } from './inventory/defaults';
 import { createDemoData } from '../demo/demoData';
 import { suggestEmployeeStatus, normalizeEmployeeNumber } from './validation';
 import { toPreviousBusinessDay, isValidISODate } from './date';
 
 const TODAY = '2026-10-15';
+
+describe('部署別の在籍状況', () => {
+  const base = { id: 'e', employeeNumber: 'X', name: 'x', departmentId: 'd1', position: '', employmentType: '正社員' as const, hireDate: '2020-04-01', retireDate: null, status: 'active' as const, notes: '', createdAt: '', updatedAt: '' };
+  it('ステータスと退職日から区分を決める', () => {
+    expect(staffSegment(base, TODAY)).toBe('active');
+    expect(staffSegment({ ...base, status: 'pending' }, TODAY)).toBe('joining_scheduled');
+    expect(staffSegment({ ...base, retireDate: '2026-11-30' }, TODAY)).toBe('leaving_scheduled');
+    expect(staffSegment({ ...base, retireDate: TODAY }, TODAY)).toBe('leaving_scheduled'); // 当日はまだ在籍
+    expect(staffSegment({ ...base, status: 'leave' }, TODAY)).toBe('leave_absence');
+    expect(staffSegment({ ...base, status: 'leave', retireDate: '2026-12-31' }, TODAY)).toBe('leaving_scheduled');
+    expect(staffSegment({ ...base, status: 'retired', retireDate: '2026-01-31' }, TODAY)).toBe('retired');
+  });
+  it('部署ごとに集計し、在籍人数は 在籍中＋退職予定＋休職中', () => {
+    const emps = [
+      { ...base, id: '1' },
+      { ...base, id: '2' },
+      { ...base, id: '3', retireDate: '2026-11-30' },
+      { ...base, id: '4', status: 'leave' as const },
+      { ...base, id: '5', status: 'pending' as const },
+      { ...base, id: '6', status: 'retired' as const },
+      { ...base, id: '7', departmentId: 'd2' },
+    ];
+    const [d1, d2] = computeDepartmentBreakdown(emps, [{ id: 'd1', name: '総務部', order: 1 }, { id: 'd2', name: '営業部', order: 2 }], TODAY);
+    expect(d1!.counts).toEqual({ active: 2, leaving_scheduled: 1, leave_absence: 1, joining_scheduled: 1, retired: 1 });
+    expect(d1!.enrolled).toBe(4);
+    expect(d1!.total).toBe(6);
+    expect(d2!.enrolled).toBe(1);
+  });
+  it('デモデータの合計は社員数と一致する', () => {
+    const data = createDemoData(TODAY);
+    const s = computeDashboard(data, TODAY);
+    expect(s.departmentBreakdown.reduce((a, d) => a + d.total, 0)).toBe(data.employees.length);
+    expect(s.departmentBreakdown.some((d) => d.counts.leaving_scheduled > 0)).toBe(true); // デモ: 退職予定者あり
+  });
+});
 
 describe('computeDashboard', () => {
   it('デモデータから各指標を集計する', () => {
@@ -26,7 +61,7 @@ describe('computeDashboard', () => {
   });
 
   it('タスク0件でも完了率は0%', () => {
-    const s = computeDashboard({ ...emptyInventory(false), departments: [], employees: [], tasks: [], rules: [], activities: [], inquiries: [], faqs: [], inquiryCategories: [] }, TODAY);
+    const s = computeDashboard({ ...emptyInventory(false), documents: [], departments: [], employees: [], tasks: [], rules: [], activities: [], inquiries: [], faqs: [], inquiryCategories: [] }, TODAY);
     expect(s.completionRate).toBe(0);
   });
 });

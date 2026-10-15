@@ -38,6 +38,7 @@ import { InquiryFormFields, type InquiryFormState } from '../../features/helpdes
 import { CategoryBadge, InquiryStatusBadge, SecretWarning, SolutionSuggestions } from '../../features/helpdesk/parts';
 import { TaskFormModal } from '../../features/TaskFormModal';
 import { InquiryEquipmentCard } from '../../features/inventory/RelatedEquipment';
+import { RelatedDocumentsCard } from '../../features/documents/light';
 import { TaskItem } from '../../features/TaskItem';
 import { PriorityBadge } from '../../ui/badges';
 import { Modal, ModalCancelButton } from '../../ui/Modal';
@@ -280,6 +281,7 @@ export function InquiryDetailPage({ inquiryId, query }: { inquiryId: string; que
 
       {/* 関連機器 (在庫・資産との連携) */}
       <InquiryEquipmentCard inquiryId={inquiry.id} requesterId={inquiry.requesterId} />
+      <RelatedDocumentsCard filter={(d) => d.inquiryId === inquiry.id} newHref={`#/documents/new?inquiry=${inquiry.id}`} />
 
       {/* 解決内容 */}
       <ResolutionCard inquiry={inquiry} onFaq={() => setFaqOpen(true)} />

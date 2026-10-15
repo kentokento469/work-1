@@ -307,7 +307,7 @@ export class InventoryService {
       const orig = await store.get(movementId);
       if (!orig) throw new AppError('取り消す入出庫履歴が見つかりません');
       if (orig.refType === 'reversal') throw new AppError('取り消しの記録は取り消せません');
-      if (orig.refType === 'purchase_order' || orig.refType === 'reservation' || orig.type === 'stocktake') throw new AppError('発注の入荷・予約の引き渡し・棚卸は、それぞれの画面から訂正してください');
+      if (orig.refType === 'purchase_order' || orig.refType === 'reservation' || orig.refType === 'document' || orig.type === 'stocktake') throw new AppError('発注の入荷・予約の引き渡し・書類からの入庫・棚卸は、取り消しではなく在庫調整で訂正してください');
       const all = await store.index('byItem').getAll(orig.itemId);
       if (all.some((m) => m.refType === 'reversal' && m.refId === orig.id)) throw new AppError('この入出庫は既に取り消されています');
       const item = await this.getItem(tx, orig.itemId);
@@ -704,6 +704,17 @@ export class InventoryService {
   async receiveOrder(id: string, lines: { lineId: string; quantity: number; locationId: string }[], requestId?: string): Promise<OpResult<{ assets: Asset[]; order: PurchaseOrder }>> {
     return this.run(ALL, async (tx) => {
       if (await this.seen(tx, requestId)) return { duplicated: true } as const;
+      const { created, order, msgs } = await this.receiveOrderInTx(tx, id, lines, '');
+      await this.syncSuggestions(tx);
+      await this.remember(tx, requestId);
+      await logActivity(tx, 'purchase', 'receive', `発注書 ${order.number} の入荷を登録しました（${msgs.join('、')}）`, order.id);
+      return { duplicated: false, value: { assets: created, order } } as const;
+    });
+  }
+
+  /** 発注書の入荷処理 (トランザクション内)。発注書の画面と、納品書からの引き渡しの両方で使う */
+  private async receiveOrderInTx(tx: WriteTx, id: string, lines: { lineId: string; quantity: number; locationId: string }[], via: string) {
+    {
       const po = await tx.objectStore('purchaseOrders').get(id);
       if (!po) throw new AppError('発注書が見つかりません');
       if (po.status !== 'approved' && po.status !== 'partially_received') throw new AppError(`「${PO_STATUS_LABEL[po.status]}」の発注書は入荷登録できません（承認済みのみ）`);
@@ -760,12 +771,74 @@ export class InventoryService {
         msgs.push(`${item.name} ${t.quantity}${item.unit}`);
       }
       const done = updatedLines.every((l) => l.receivedQuantity >= l.quantity);
-      const next = this.poEvent({ ...po, lines: updatedLines, status: done ? 'received' : 'partially_received' }, `入荷登録：${msgs.join('、')}${done ? '（入荷完了）' : '（一部入荷）'}`);
+      const next = this.poEvent({ ...po, lines: updatedLines, status: done ? 'received' : 'partially_received' }, `入荷登録${via}：${msgs.join('、')}${done ? '（入荷完了）' : '（一部入荷）'}`);
       await tx.objectStore('purchaseOrders').put(next);
+      return { created, order: next, msgs };
+    }
+  }
+
+  /**
+   * 納品書の明細を在庫へ引き渡す (Phase 4)。
+   * - 確認済みの書類だけ。OCR の結果だけでは在庫を変えない (利用者がこの操作を実行したときだけ)
+   * - 1つの書類から反映できるのは1回だけ (二重入庫の防止)。書類・在庫・発注書を同じトランザクションで更新
+   * - mode 'purchase_order': 関連発注書の入荷として登録 (未入荷数まで。個体管理品は資産を自動登録)
+   * - mode 'receive': 発注書なしで数量管理品を入庫
+   */
+  async receiveFromDocument(p: {
+    documentId: string;
+    mode: 'receive' | 'purchase_order';
+    locationId: string;
+    lines: { itemId: string; quantity: number }[];
+    requestId?: string;
+  }): Promise<OpResult<{ movements: StockMovement[]; assets: Asset[] }>> {
+    return this.run(ALL, async (tx) => {
+      if (await this.seen(tx, p.requestId)) return { duplicated: true } as const;
+      const doc = await tx.objectStore('documents').get(p.documentId);
+      if (!doc) throw new AppError('書類が見つかりません');
+      if (doc.deletedAt) throw new AppError('ゴミ箱の書類からは反映できません');
+      if (doc.status !== 'confirmed') throw new AppError('確認済みの書類だけ在庫に反映できます。先に抽出内容を確認してください');
+      if (doc.inventory) throw new AppError(`この書類は既に在庫へ反映済みです（${doc.inventory.at.slice(0, 10)}）`);
+      const targets = p.lines.filter((l) => l.quantity > 0);
+      if (!targets.length) throw new AppError('反映する品目と数量を入力してください');
+      for (const t of targets) {
+        const qe = validateQuantity(t.quantity);
+        if (qe) throw new AppError(qe);
+      }
+      const before = new Set((await tx.objectStore('stockMovements').getAll()).map((m) => m.id));
+      let created: Asset[] = [];
+      if (p.mode === 'purchase_order') {
+        if (!doc.purchaseOrderId) throw new AppError('関連発注書が設定されていません');
+        const po = await tx.objectStore('purchaseOrders').get(doc.purchaseOrderId);
+        if (!po) throw new AppError('関連発注書が見つかりません');
+        const used = new Set<string>();
+        const lines = targets.map((t) => {
+          const line = po.lines.find((l) => l.itemId === t.itemId && !used.has(l.id) && l.quantity - l.receivedQuantity > 0);
+          if (!line) throw new AppError('発注書にない品目、または入荷済みの品目が含まれています');
+          used.add(line.id);
+          return { lineId: line.id, quantity: t.quantity, locationId: p.locationId };
+        });
+        const r = await this.receiveOrderInTx(tx, po.id, lines, `（納品書 ${doc.number}）`);
+        created = r.created;
+      } else {
+        for (const t of targets) {
+          const item = await this.getItem(tx, t.itemId);
+          if (item.tracking === 'asset') throw new AppError(`「${item.name}」は1台ずつ管理する品目のため、発注書の入荷として登録するか、資産台帳に登録してください`);
+          await this.applyMovement(tx, item, { type: 'receive', delta: t.quantity, quantity: t.quantity, locationId: p.locationId, toLocationId: null, reason: `納品書 ${doc.number} による入庫`, refType: 'document', refId: doc.id, employeeId: null });
+          await this.allocateBackorders(tx, item);
+        }
+      }
+      const movements = (await tx.objectStore('stockMovements').getAll()).filter((m) => !before.has(m.id));
+      const now = nowISO();
+      await tx.objectStore('documents').put({
+        ...doc,
+        inventory: { at: now, mode: p.mode, purchaseOrderId: p.mode === 'purchase_order' ? doc.purchaseOrderId : null, lines: targets, movementIds: movements.map((m) => m.id) },
+        updatedAt: now,
+        history: [...doc.history, { at: now, message: `在庫へ反映：${p.mode === 'purchase_order' ? '発注書の入荷として' : '入庫として'}${targets.length}品目（入出庫履歴${movements.length}件・資産${created.length}台）` }],
+      });
       await this.syncSuggestions(tx);
-      await this.remember(tx, requestId);
-      await logActivity(tx, 'purchase', 'receive', `発注書 ${po.number} の入荷を登録しました（${msgs.join('、')}）`, po.id);
-      return { duplicated: false, value: { assets: created, order: next } } as const;
+      await this.remember(tx, p.requestId);
+      await logActivity(tx, 'inventory', 'receive', `納品書 ${doc.number} の明細を在庫へ反映しました（${targets.length}品目）`, doc.id);
+      return { duplicated: false, value: { movements, assets: created } } as const;
     });
   }
 

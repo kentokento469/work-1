@@ -1,9 +1,12 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Boxes, Database, Download, FileJson, FileSpreadsheet, Headset, History, RefreshCcw, ShieldCheck, Trash2, Upload } from 'lucide-react';
 import { useAppData } from '../app/AppData';
 import { downloadText, timestampForFile } from '../app/download';
-import { createBackup, parseBackupText, type BackupFile } from '../data/backup';
-import { assetsToCsv, employeesToCsv, inquiriesToCsv, itemsToCsv, movementsToCsv, tasksToCsv } from '../data/csv';
+import { createBackup, decodeBackupFiles, parseBackupText, type BackupFile } from '../data/backup';
+import type { DocumentFile } from '../domain/documents/types';
+import { formatBytes } from '../features/documents/engine/assets';
+import { StorageMeter } from '../features/documents/parts';
+import { assetsToCsv, documentsToCsv, filterDocumentsForExport, employeesToCsv, inquiriesToCsv, itemsToCsv, movementsToCsv, tasksToCsv } from '../data/csv';
 import { DemoNotice } from '../app/Layout';
 import { formatDateTimeJa } from '../domain/date';
 import type { ActivityCategory, DataSnapshot } from '../domain/types';
@@ -12,7 +15,8 @@ import { ConfirmDialog } from '../ui/Modal';
 import { useToast } from '../ui/Toast';
 import { Button, Card, CardHeader, EmptyState, FilterSelect, PageHeader } from '../ui/primitives';
 
-const MAX_RESTORE_BYTES = 10 * 1024 * 1024;
+/** 書類の元ファイルを含むバックアップは大きくなるため上限を広げる (端末のメモリを考慮して 150MB まで) */
+const MAX_RESTORE_BYTES = 150 * 1024 * 1024;
 
 const CATEGORY_OPTIONS: { value: '' | ActivityCategory; label: string }[] = [
   { value: '', label: 'すべての操作' },
@@ -45,20 +49,26 @@ const COUNT_LABEL: Record<keyof DataSnapshot, string> = {
   purchaseOrders: '発注書',
   equipmentRules: '必要機器ルール',
   automationRuns: '自動化の処理履歴',
+  documents: '書類',
 };
 
 export function DataPage() {
   const { data, run, service } = useAppData();
   const toast = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
-  const [restoreCandidate, setRestoreCandidate] = useState<{ backup: BackupFile; counts: Record<keyof DataSnapshot, number>; fileName: string } | null>(null);
+  const [restoreCandidate, setRestoreCandidate] = useState<{ backup: BackupFile; counts: Record<keyof DataSnapshot, number>; fileName: string; files: DocumentFile[]; missingFiles: number } | null>(null);
+  const [includeFiles, setIncludeFiles] = useState(true);
+  const [fileBytes, setFileBytes] = useState<number | null>(null);
+  useEffect(() => {
+    service.documents.totalFileBytes().then(setFileBytes).catch(() => setFileBytes(null));
+  }, [service, data.documents]);
   const [restoreErrors, setRestoreErrors] = useState<string[]>([]);
   const [confirmReset, setConfirmReset] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
   const [category, setCategory] = useState('');
   const [logLimit, setLogLimit] = useState(30);
 
-  const exportFile = async (kind: 'employees' | 'tasks' | 'inquiries' | 'items' | 'movements' | 'assets' | 'json') => {
+  const exportFile = async (kind: 'employees' | 'tasks' | 'inquiries' | 'items' | 'movements' | 'assets' | 'documents' | 'json') => {
     const ts = timestampForFile();
     if (kind === 'items') downloadText(`workcore_inventory_${ts}.csv`, itemsToCsv(data), 'text/csv;charset=utf-8');
     else if (kind === 'movements') downloadText(`workcore_stock_movements_${ts}.csv`, movementsToCsv(data), 'text/csv;charset=utf-8');
@@ -66,7 +76,12 @@ export function DataPage() {
     else if (kind === 'inquiries') downloadText(`workcore_inquiries_${ts}.csv`, inquiriesToCsv(data), 'text/csv;charset=utf-8');
     else if (kind === 'employees') downloadText(`workcore_employees_${ts}.csv`, employeesToCsv(data), 'text/csv;charset=utf-8');
     else if (kind === 'tasks') downloadText(`workcore_tasks_${ts}.csv`, tasksToCsv(data), 'text/csv;charset=utf-8');
-    else downloadText(`workcore_backup_${ts}.json`, JSON.stringify(createBackup(data), null, 2), 'application/json');
+    else if (kind === 'documents') downloadText(`workcore_documents_${ts}.csv`, documentsToCsv(filterDocumentsForExport(data.documents, {}), data), 'text/csv;charset=utf-8');
+    else {
+      // 元ファイルは Base64 で埋め込む (サイズが約1.33倍になる)。含めない場合は抽出結果だけを保存
+      const files = includeFiles ? await service.loadAllDocumentFiles() : undefined;
+      downloadText(`workcore_backup_${ts}.json`, JSON.stringify(createBackup(data, new Date(), files), null, files?.length ? 0 : 2), 'application/json');
+    }
     const label =
       kind === 'employees'
         ? `社員一覧CSV（${data.employees.length}件）`
@@ -80,7 +95,9 @@ export function DataPage() {
                 ? `入出庫履歴CSV（${data.stockMovements.length}件）`
                 : kind === 'assets'
                   ? `資産台帳CSV（${data.assets.length}台）`
-                  : 'JSONバックアップ';
+                  : kind === 'documents'
+                    ? `書類一覧CSV（${data.documents.filter((d) => !d.deletedAt).length}件）`
+                    : `JSONバックアップ${includeFiles && data.documents.some((d) => d.file) ? '（書類の元ファイルを含む）' : ''}`;
     await run((s) => s.recordExport(`${label}を出力しました`), `${label}を出力しました`).catch(() => undefined);
   };
 
@@ -88,7 +105,7 @@ export function DataPage() {
     setRestoreErrors([]);
     if (!file) return;
     if (file.size > MAX_RESTORE_BYTES) {
-      setRestoreErrors(['ファイルサイズが大きすぎます（10MBまで）']);
+      setRestoreErrors([`ファイルサイズが大きすぎます（${formatBytes(MAX_RESTORE_BYTES)}まで）`]);
       return;
     }
     try {
@@ -99,7 +116,16 @@ export function DataPage() {
         toast.error('バックアップファイルの検証に失敗しました');
         return;
       }
-      setRestoreCandidate({ backup: r.backup, counts: r.counts, fileName: file.name });
+      // 元ファイルは復元前にハッシュを検証する (破損したファイルを書類に結び付けない)
+      const decoded = await decodeBackupFiles(r.backup);
+      if (!decoded.ok) {
+        setRestoreErrors(decoded.errors);
+        toast.error('バックアップ内の元ファイルの検証に失敗しました');
+        return;
+      }
+      const included = new Set(decoded.files.map((f) => f.id));
+      const missingFiles = r.backup.data.documents.filter((d) => d.file && !included.has(d.file.fileId)).length;
+      setRestoreCandidate({ backup: r.backup, counts: r.counts, fileName: file.name, files: decoded.files, missingFiles });
     } catch {
       setRestoreErrors(['ファイルを読み込めませんでした']);
     } finally {
@@ -140,9 +166,20 @@ export function DataPage() {
             <Button variant="secondary" icon={FileSpreadsheet} onClick={() => exportFile('assets')} className="justify-start" data-testid="export-assets">
               資産台帳をCSV出力（{data.assets.length}台）
             </Button>
+            <Button variant="secondary" icon={FileSpreadsheet} onClick={() => exportFile('documents')} className="justify-start" data-testid="export-documents">
+              書類一覧をCSV出力（{data.documents.filter((d) => !d.deletedAt).length}件）
+            </Button>
             <Button variant="secondary" icon={FileJson} onClick={() => exportFile('json')} className="justify-start" data-testid="export-json">
               全データをJSONバックアップ
             </Button>
+            <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm">
+              <input type="checkbox" className="size-5 accent-navy-700" checked={includeFiles} onChange={(e) => setIncludeFiles(e.target.checked)} data-testid="backup-include-files" />
+              書類の元ファイル（画像・PDF）も含める{fileBytes !== null && `（約${formatBytes(Math.round(fileBytes * 1.34))}）`}
+            </label>
+            <div className="rounded-lg bg-slate-50 p-2 dark:bg-navy-950">
+              <p className="mb-1 text-xs font-semibold text-slate-600 dark:text-slate-300">この端末の保存容量</p>
+              <StorageMeter />
+            </div>
             <p className="text-xs text-slate-500 dark:text-slate-400">iPhoneの場合、保存先は「ファイル」アプリのダウンロードフォルダです。</p>
           </div>
         </Card>
@@ -287,11 +324,15 @@ export function DataPage() {
                   </li>
                 ))}
               </ul>
+              <p className="mt-2 text-xs">
+                書類の元ファイル：{restoreCandidate.files.length}件（内容のハッシュを検証済み）
+                {restoreCandidate.missingFiles > 0 && <span className="text-amber-700 dark:text-amber-400">。元ファイルを含まない書類 {restoreCandidate.missingFiles}件は、抽出結果だけが復元されます</span>}
+              </p>
               <p className="mt-2 text-xs">必要に応じて、先に現在のデータをバックアップしてください。</p>
             </>
           )
         }
-        onConfirm={() => (restoreCandidate ? run((s) => s.restoreBackup(restoreCandidate.backup), 'バックアップから復元しました') : undefined)}
+        onConfirm={() => (restoreCandidate ? run((s) => s.restoreBackup(restoreCandidate.backup, restoreCandidate.files), 'バックアップから復元しました') : undefined)}
         onClose={() => setRestoreCandidate(null)}
       />
       <ConfirmDialog

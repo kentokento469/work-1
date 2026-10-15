@@ -1,3 +1,4 @@
+import type { DocumentRecord } from './documents/types';
 import type {
   Asset,
   AssetEvent,
@@ -136,7 +137,8 @@ export type ActivityCategory =
   | 'inventory'
   | 'asset'
   | 'purchase'
-  | 'automation';
+  | 'automation'
+  | 'document';
 
 export interface ActivityLog {
   id: string;
@@ -264,4 +266,6 @@ export interface DataSnapshot {
   purchaseOrders: PurchaseOrder[];
   equipmentRules: EquipmentRule[];
   automationRuns: AutomationRun[];
+  // Phase 4: 書類 (元ファイル本体は含まない)
+  documents: DocumentRecord[];
 }

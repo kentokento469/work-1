@@ -2,7 +2,7 @@
  * 実ブラウザでのDBマイグレーション検証 (Phase 1 版で作ったデータを Phase 2 版で開く)。
  *
  * 実行方法 (同一オリジンに旧版・新版を配置する必要があるため通常のテストでは skip):
- *   1. Phase 1 を <site>/p1/、Phase 2 を <site>/p2/、Phase 3 を <site>/p3/ にビルド (vite build --outDir)
+ *   1. Phase 1〜4 を <site>/p1/〜/p4/ にビルド (vite build --outDir。検証したい組み合わせだけでよい)
  *   2. <site> を静的配信 (例: python3 -m http.server 4180 -d <site>)
  *   3. MIGRATION_SITE_URL=http://localhost:4180 npx playwright test e2e/migration.spec.ts --project=iphone
  */
@@ -104,4 +104,40 @@ test('[Migration] Phase 2 のデータ（社員・問い合わせ）を保持し
   expect(after.items).toBeGreaterThan(0);
   await page.goto(`${SITE}/p3/#/inventory`);
   await expect(page.getByTestId('item-list')).toBeVisible();
+});
+
+test('[Migration] Phase 3 のデータ（社員・在庫・入出庫履歴）を保持したまま Phase 4 に移行できる', async ({ page }) => {
+  test.skip(!SITE, 'MIGRATION_SITE_URL が未設定のため skip');
+  const counts = () =>
+    page.evaluate(async () => {
+      const db = await new Promise<IDBDatabase>((r) => {
+        const q = indexedDB.open('workcore');
+        q.onsuccess = () => r(q.result);
+      });
+      const has = (s: string) => db.objectStoreNames.contains(s);
+      const count = (s: string) => (has(s) ? new Promise<number>((r) => { const c = db.transaction(s).objectStore(s).count(); c.onsuccess = () => r(c.result); }) : Promise.resolve(-1));
+      const v = { version: db.version, employees: await count('employees'), inquiries: await count('inquiries'), items: await count('items'), stockMovements: await count('stockMovements'), assets: await count('assets'), documents: await count('documents') };
+      db.close();
+      return v;
+    });
+  // Phase 3 版: デモデータの上で入庫を1件記録
+  await page.goto(`${SITE}/p3/#/inventory?tab=stock&q=${encodeURIComponent('マウス')}`);
+  await page.locator('[data-item-name="マウス（無線）"]').getByRole('button', { name: 'マウス（無線）を入庫' }).click();
+  await page.getByTestId('qty-submit').click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  const p3 = await counts();
+  expect(p3.version).toBe(3);
+  expect(p3.documents).toBe(-1);
+
+  // Phase 4 版で開く → v4 へ自動移行。既存データの件数は変わらず、書類は空
+  await page.goto(`${SITE}/p4/#/documents`);
+  await expect(page.getByRole('heading', { name: '書類管理' })).toBeVisible();
+  const p4 = await counts();
+  expect(p4).toMatchObject({ version: 4, employees: p3.employees, inquiries: p3.inquiries, items: p3.items, stockMovements: p3.stockMovements, assets: p3.assets, documents: 0 });
+  // 書類を手入力で1件登録しても既存データは変わらない
+  await page.goto(`${SITE}/p4/#/documents/new`);
+  await page.getByLabel('書類の種類').selectOption({ label: '領収書' });
+  await page.getByTestId('import-manual').click();
+  await expect(page.getByTestId('doc-number')).toBeVisible();
+  expect(await counts()).toMatchObject({ employees: p3.employees, stockMovements: p3.stockMovements, documents: 1 });
 });

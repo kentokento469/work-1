@@ -73,7 +73,7 @@ export const MOVEMENT_TYPE_LABEL: Record<MovementType, string> = {
   stocktake: '棚卸差異',
 };
 
-export type MovementRefType = 'manual' | 'purchase_order' | 'reservation' | 'inquiry' | 'employee' | 'stocktake' | 'reversal';
+export type MovementRefType = 'manual' | 'purchase_order' | 'reservation' | 'inquiry' | 'employee' | 'stocktake' | 'reversal' | 'document';
 
 /** 入出庫台帳 (追記のみ・変更不可) */
 export interface StockMovement {

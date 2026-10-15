@@ -6,6 +6,7 @@
  *  v1 (Phase 1): departments, employees, tasks, rules, activities, meta
  *  v2 (Phase 2): inquiries, faqs, inquiryCategories を追加。既存タスクに inquiryId: null を付与
  *  v3 (Phase 3): 在庫・IT資産・購買・自動化履歴のストアを追加。保管場所・仕入先 (架空) の初期マスタを投入
+ *  v4 (Phase 4): documents (書類・抽出結果), documentFiles (元ファイル本体) を追加
  */
 import { openDB, type DBSchema, type IDBPDatabase, type IDBPTransaction, type StoreNames } from 'idb';
 import { createDefaultInquiryCategories } from '../domain/helpdesk/defaults';
@@ -25,9 +26,10 @@ import type {
   Supplier,
 } from '../domain/inventory/types';
 import { createDefaultLocations, createDefaultSuppliers } from '../domain/inventory/defaults';
+import type { DocumentFile, DocumentRecord } from '../domain/documents/types';
 
 export const DB_NAME = 'workcore';
-export const DB_VERSION = 3;
+export const DB_VERSION = 4;
 
 export interface WorkCoreSchema extends DBSchema {
   departments: { key: string; value: Department };
@@ -51,6 +53,8 @@ export interface WorkCoreSchema extends DBSchema {
   purchaseOrders: { key: string; value: PurchaseOrder; indexes: { byNumber: string } };
   equipmentRules: { key: string; value: EquipmentRule };
   automationRuns: { key: string; value: AutomationRun; indexes: { byKey: string } };
+  documents: { key: string; value: DocumentRecord; indexes: { byNumber: string } };
+  documentFiles: { key: string; value: DocumentFile; indexes: { byDocument: string; byHash: string } };
 }
 
 export type WorkCoreDB = IDBPDatabase<WorkCoreSchema>;
@@ -76,10 +80,16 @@ export const STORE_NAMES = [
   'purchaseOrders',
   'equipmentRules',
   'automationRuns',
+  'documents',
+  'documentFiles',
 ] as const;
 
-/** バックアップ・スナップショット対象 (meta 以外) */
-export const DATA_STORES = STORE_NAMES.filter((s) => s !== 'meta') as Exclude<(typeof STORE_NAMES)[number], 'meta'>[];
+/**
+ * スナップショット対象 (meta と、書類の元ファイル本体 documentFiles 以外)。
+ * 元ファイルは数MBになり得るため、毎回の全件読み込みには含めず、必要な画面でだけ読む
+ */
+export type DataStoreName = Exclude<(typeof STORE_NAMES)[number], 'meta' | 'documentFiles'>;
+export const DATA_STORES = STORE_NAMES.filter((s) => s !== 'meta' && s !== 'documentFiles') as DataStoreName[];
 
 type UpgradeTx = IDBPTransaction<WorkCoreSchema, StoreNames<WorkCoreSchema>[], 'versionchange'>;
 
@@ -132,6 +142,15 @@ async function migrateToV3(db: IDBPDatabase<WorkCoreSchema>, tx: UpgradeTx) {
   await tx.objectStore('meta').put({ key: 'schemaMigratedToV3', value: new Date().toISOString() });
 }
 
+/** v3 → v4: 書類管理のストアを追加 (既存データには触れない) */
+async function migrateToV4(db: IDBPDatabase<WorkCoreSchema>, tx: UpgradeTx) {
+  db.createObjectStore('documents', { keyPath: 'id' }).createIndex('byNumber', 'number', { unique: true });
+  const files = db.createObjectStore('documentFiles', { keyPath: 'id' });
+  files.createIndex('byDocument', 'documentId');
+  files.createIndex('byHash', 'hash');
+  await tx.objectStore('meta').put({ key: 'schemaMigratedToV4', value: new Date().toISOString() });
+}
+
 export function openWorkCoreDB(name = DB_NAME, version = DB_VERSION): Promise<WorkCoreDB> {
   return openDB<WorkCoreSchema>(name, version, {
     async upgrade(db, oldVersion, _newVersion, tx) {
@@ -151,6 +170,7 @@ export function openWorkCoreDB(name = DB_NAME, version = DB_VERSION): Promise<Wo
       }
       if (oldVersion < 2 && version >= 2) await migrateToV2(db, tx);
       if (oldVersion < 3 && version >= 3) await migrateToV3(db, tx);
+      if (oldVersion < 4 && version >= 4) await migrateToV4(db, tx);
     },
     blocked() {
       console.warn('WorkCore: 他のタブでデータベースが使用中です');

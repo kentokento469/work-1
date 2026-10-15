@@ -1,6 +1,6 @@
-# WorkCore システム構成（Phase 3 時点）
+# WorkCore システム構成（Phase 4 時点）
 
-Phase 3 で追加した在庫・資産・購買と自動化エンジンは [§9 以降](#9-phase-3在庫資産購買のデータモデル) を参照。§1〜8 は Phase 2 までの構成で、Phase 3 でも変わっていない。
+Phase 3 で追加した在庫・資産・購買と自動化エンジンは §9〜13、Phase 4 の書類処理は §14〜18 を参照。§1〜8 は Phase 2 までの構成で、Phase 3 でも変わっていない。
 
 ## 1. レイヤー構成
 
@@ -251,3 +251,66 @@ interface AutomationProposal {
 | 部分的な失敗 | すべての操作を1つの IndexedDB トランザクションで実行し、例外時は `abortWith()` で全体を取り消す（MDN IDBTransaction、META_DESIGN R16） |
 | 削除による履歴消失 | 履歴のある品目は無効化のみ。資産は削除せず「廃棄済み」。資産・予約を持つ社員は削除不可 |
 | 古い提案の実行 | 承認時に再判定し、key・選択した操作が一致しなければ拒否 |
+
+---
+
+## 14. Phase 4：書類処理のデータモデル
+
+| ストア | 主なフィールド | インデックス |
+| --- | --- | --- |
+| documents | number（DOC-2026-0001）, type, status（needs_review / confirmed / archived）, method（pdf_text / ocr / mixed / manual）, fields（現在の値）, extracted（自動抽出した値・抽出元の行・ページ・確実性・理由・OCR信頼度）, reviewed（確認済みの項目）, lines（明細）, taxLines, pages（ページ別の抽出元テキスト）, file（元ファイルの参照・SHA-256・ページ数・解析したページ）, employeeId / inquiryId / purchaseOrderId, inventory（在庫への反映記録）, notDuplicateOf, history, createdAt / updatedAt / deletedAt | byNumber（**一意**） |
+| documentFiles | documentId, name, mime, size, hash, data（**ArrayBuffer**） | byDocument, byHash |
+
+設計判断
+- **書類と元ファイルを別ストアに分ける。** 画面の再描画のたびに読む全データのスナップショット（`loadSnapshot`）には documents だけを含め、数MBになり得る元ファイルはプレビュー・バックアップの時だけ読む
+- **元ファイルは Blob ではなく ArrayBuffer で保存する。** iOS Safari の IndexedDB では Blob の保存に過去に不具合があったため、構造化複製が確実な ArrayBuffer を選んだ
+- **「現在の値」と「自動抽出した値」を分けて持つ。** 修正前の値・抽出元を後から確認でき、再抽出しても利用者が手で直した項目は上書きしない（現在の値が前回の抽出値と同じ・空の項目だけを置き換える）
+- **削除は2段階。** `deletedAt` を付けてゴミ箱へ（元に戻せる）、完全削除はゴミ箱からのみ。在庫に反映した書類は入出庫履歴の根拠なので完全削除できない
+- 社員・問い合わせを削除しても書類は残し、関連付けだけを外す（取り消すと戻る）
+
+## 15. 解析パイプライン（`features/documents/engine/`）
+
+```
+取り込み ─> ファイル判定 (fileKind) ─> サイズ・保存容量の確認 ─> SHA-256 ─> 同じハッシュの書類があれば警告
+        ─> 書類と元ファイルを1トランザクションで保存 (DocumentService.create)   ← OCR 前に保存し、失敗しても原本は残る
+解析     ─> PDF: 選んだページを1ページずつ
+              ├ getTextContent() の文字が15文字以上 → そのまま使う (pdf_text)
+              └ 足りない → 長辺2400px以下で描画 → OCR → キャンバスを解放 (ocr)
+         ─> 画像: 長辺2400px以下に縮小 (EXIF の向きを反映) → OCR
+         ─> extractDocument() で項目化 (純粋関数) ─> applyExtraction()
+確認     ─> ReviewForm (一時保存 / 確認完了) ─> saveReview()
+```
+
+- PDF.js と Tesseract.js は**動的 import**（必要になった時だけ読み込む）。OCR は Tesseract.js の Web Worker 内で実行し、画面を止めない
+- キャンセルは AbortController → Worker を終了。画面を離れた場合も中断する
+- OCR エンジン・言語データは WorkCore 自身から配信し（`scripts/copy-ocr-assets.mjs` がビルド前に `node_modules` から `public/vendor/` へコピー）、初回に利用者の操作で Cache Storage に保存。以降はキャッシュから Blob URL / メモリで Tesseract に渡すため、オフラインでも動く
+- tesseract.js 7.0.0 の不具合（言語データをオブジェクトで渡すと初期化に失敗）は、配信用 Worker のコピーの1か所を修正して回避。想定と異なる構成ならビルドを止める
+
+## 16. 項目抽出（`domain/documents/extract.ts`）
+
+| 段階 | 内容 |
+| --- | --- |
+| 正規化 | NFKC（全角英数→半角）、円記号の揺れ、1文字ずつ空白で区切られた行（OCR特有）だけ空白を詰める |
+| 種類の判定 | タイトルらしい短い行の「請求書」「領収書」など → 本文の定型句（「上記正に領収いたしました」）→ レシートの語（「お預り」「お釣り」） |
+| 項目 | ラベル（「ご請求金額」「支払期限」「登録番号」など）と値の形式で抽出。ラベルの同じ行になければ次の行も見る。日付は西暦・和暦（令和・平成）に対応し、存在しない日付は除外 |
+| 確実性 | high：ラベルと形式が一致／medium：ラベルが曖昧、位置からの推定／low：候補が複数、検算が合わない。**抽出元の行の OCR 信頼度が70%未満なら low に下げる**（文字認識の信頼度と抽出の確実性は別に記録） |
+| 検算 | 小計＋消費税＝合計なら3項目を high、合わなければ合計を low。明細の数量×単価＝金額、支払期限＜発行日なども確認画面で注意 |
+| 補完しない | 読み取れない項目は作らない（空欄）。書類名も推測しない |
+
+## 17. 重複検出（`domain/documents/duplicates.ts`）
+
+| 区分 | 条件 | 扱い |
+| --- | --- | --- |
+| 完全一致 | 元ファイルの SHA-256 が同じ | 取り込み時に確認ダイアログ（登録は中止も続行も可） |
+| 一致の可能性が高い | 同じ種類で、書類番号が一致し、発行元（表記ゆれを吸収）または登録番号も一致 | 確認画面に警告と比較画面 |
+| 類似 | 取引先（発行元・表記が近い発行元・登録番号）か書類番号の一致に加えて、発行日か合計金額が一致 | 同上 |
+
+自動で削除・統合はしない。比較画面で「別の書類」と判断すると `notDuplicateOf` に記録し、その組み合わせでは以後警告しない。
+
+## 18. Phase 1〜3 との連携・バックアップ・移行
+
+- **在庫への引き渡し**（`InventoryService.receiveFromDocument`）：確認済みの書類だけ・1書類1回だけ。利用者が品目の対応付けと数量を確認して実行。発注書に関連付けていれば発注書の入荷として登録（発注残を減らし、個体管理品は資産を自動登録）、なければ数量管理品を入庫。書類・在庫・発注書・発注候補を同じトランザクションで更新し、入出庫履歴には `refType: 'document'` を記録
+- **関連書類**：社員・問い合わせ・発注書の詳細画面に表示（`features/documents/light.tsx`。OCR 関連のコードを含めない軽量な部品）
+- **DB v3 → v4**：`documents`・`documentFiles` ストアを作成するだけ。既存データには触れない
+- **バックアップ v4**：`data.documents` は常に含め、元ファイルは任意で `files`（Base64）に含める。復元前に `decodeBackupFiles()` がサイズと SHA-256 を検証し、1件でも一致しなければ復元しない。元ファイルを含まない書類は抽出結果だけ復元し、画面で「元ファイルがこの端末にありません」と表示
+- **Phase 5 への拡張点**：`DocumentRecord` の確定（`status: 'confirmed'`）を自動化エンジン（`AutomationDefinition.detect`）の入力にできる。例：確認済みの納品書で在庫未反映のものを「在庫反映の提案」として出す、請求書の支払期限から支払タスクを提案する

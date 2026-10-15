@@ -22,6 +22,9 @@ const loaders = {
   inventory: () => import('../pages/inventory/InventoryPage'),
   inventoryDetail: () => import('../pages/inventory/DetailPages'),
   automation: () => import('../pages/AutomationPage'),
+  documents: () => import('../pages/documents/DocumentsPage'),
+  documentImport: () => import('../pages/documents/DocumentImportPage'),
+  documentDetail: () => import('../pages/documents/DocumentDetailPage'),
 };
 
 // 使用頻度の低い画面・ヘルプデスクは初回表示を軽くするため遅延読み込みする
@@ -39,6 +42,9 @@ const AssetDetailPage = lazy(() => loaders.inventoryDetail().then((m) => ({ defa
 const OrderDetailPage = lazy(() => loaders.inventoryDetail().then((m) => ({ default: m.OrderDetailPage })));
 const StocktakePage = lazy(() => loaders.inventoryDetail().then((m) => ({ default: m.StocktakePage })));
 const AutomationPage = lazy(() => loaders.automation().then((m) => ({ default: m.AutomationPage })));
+const DocumentsPage = lazy(() => loaders.documents().then((m) => ({ default: m.DocumentsPage })));
+const DocumentImportPage = lazy(() => loaders.documentImport().then((m) => ({ default: m.DocumentImportPage })));
+const DocumentDetailPage = lazy(() => loaders.documentDetail().then((m) => ({ default: m.DocumentDetailPage })));
 
 /** 初回表示の後、残りの画面を先読みして画面遷移時の読み込み待ち (ちらつき) をなくす */
 function usePrefetchPages() {
@@ -99,6 +105,9 @@ function Routes() {
       break;
     case 'automation':
       page = <AutomationPage />;
+      break;
+    case 'documents':
+      page = second === 'new' ? <DocumentImportPage query={route.query} /> : second ? <DocumentDetailPage id={second} query={route.query} /> : <DocumentsPage />;
       break;
     default:
       active = 'dashboard';
