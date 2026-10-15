@@ -2,6 +2,8 @@
  * 設定: 問い合わせカテゴリ (自動分類のキーワード) / 部署マスタ / 表示テーマ。
  * よく使う項目を上に、変更頻度の低いマスタを下に置く。
  */
+import { Bot } from 'lucide-react';
+import { currentProvider } from '../../ai/assist';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Monitor, Moon, Pencil, Plus, Save, Sun, Tags, Trash2 } from 'lucide-react';
 import { useAppData } from '../../app/AppData';
@@ -23,6 +25,7 @@ export function SettingsPage() {
     <>
       <PageHeader title="設定" description="変更内容はこの端末のブラウザに保存されます" />
       <ThemeCard />
+      <AiCard />
       <Card className="mt-4 overflow-hidden">
         <CardHeader
           title="問い合わせカテゴリ"
@@ -173,5 +176,29 @@ function CategoryFormModal({ open, onClose, category }: { open: boolean; onClose
         </label>
       </form>
     </Modal>
+  );
+}
+
+/** AI連携の状態。AI モデルは接続していないことを明示する (動いているように見せない) */
+function AiCard() {
+  const p = currentProvider();
+  return (
+    <Card className="mt-4 p-4" data-testid="ai-settings">
+      <p className="flex items-center gap-1.5 font-semibold">
+        <Bot className="size-4" aria-hidden />
+        AI連携
+      </p>
+      <dl className="mt-2 grid grid-cols-[7rem_1fr] gap-y-1 text-sm">
+        <dt className="text-slate-500">AIモデル</dt>
+        <dd className="font-semibold">未接続</dd>
+        <dt className="text-slate-500">現在の判定方式</dt>
+        <dd>{p.label}</dd>
+        <dt className="text-slate-500">外部への送信</dt>
+        <dd>{p.sendsData ? 'あり' : 'なし（問い合わせ・書類の内容は端末の外に送りません）'}</dd>
+      </dl>
+      <p className="mt-2 text-xs text-slate-500">
+        問い合わせの分類・対応の提案・書類の整理・タスクの提案・重複の検出・業務状況の要約は、現在すべてルールベース（キーワード・検算・一致判定）で行っています。AIモデルを接続する仕組み（差し替え口）は用意していますが、接続する場合は送信する内容の確認と、利用者の許可が必要です。
+      </p>
+    </Card>
   );
 }

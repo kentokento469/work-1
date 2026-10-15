@@ -4,8 +4,8 @@
  * - 関連する社員・タスク・FAQへ1タップで移動できる
  */
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { BackLink } from '../../app/BackLink';
 import {
-  ArrowLeft,
   BookOpenCheck,
   CheckCircle2,
   ClipboardList,
@@ -94,10 +94,7 @@ export function InquiryDetailPage({ inquiryId, query }: { inquiryId: string; que
 
   return (
     <>
-      <a href="#/helpdesk" className="-ml-2 mb-3 inline-flex min-h-10 items-center gap-1 rounded-lg px-2 text-sm text-slate-500 hover:text-slate-800 dark:hover:text-slate-200">
-        <ArrowLeft className="size-4" aria-hidden />
-        問い合わせ一覧
-      </a>
+      <BackLink href="#/helpdesk">問い合わせ一覧</BackLink>
 
       {justCreated && (
         <div className="mb-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-100" role="status">
@@ -282,6 +279,7 @@ export function InquiryDetailPage({ inquiryId, query }: { inquiryId: string; que
       {/* 関連機器 (在庫・資産との連携) */}
       <InquiryEquipmentCard inquiryId={inquiry.id} requesterId={inquiry.requesterId} />
       <RelatedDocumentsCard filter={(d) => d.inquiryId === inquiry.id} newHref={`#/documents/new?inquiry=${inquiry.id}`} />
+      <RequesterHistoryCard inquiry={inquiry} />
 
       {/* 解決内容 */}
       <ResolutionCard inquiry={inquiry} onFaq={() => setFaqOpen(true)} />
@@ -738,5 +736,29 @@ function CloseModal({ open, onClose, inquiry, tasks }: { open: boolean; onClose:
         確認の経緯はコメントに残しておくと後から追跡できます。
       </p>
     </Modal>
+  );
+}
+
+/** 同じ申請者の他の問い合わせ (過去の経緯・同じ不具合の再発に気付けるように) */
+function RequesterHistoryCard({ inquiry }: { inquiry: Inquiry }) {
+  const { data } = useAppData();
+  if (!inquiry.requesterId) return null;
+  const others = data.inquiries.filter((i) => i.requesterId === inquiry.requesterId && i.id !== inquiry.id).slice(0, 5);
+  if (!others.length) return null;
+  return (
+    <Card className="mt-4" data-testid="requester-history">
+      <CardHeader title={`${inquiry.requesterName}さんの他の問い合わせ`} icon={History} description={`${others.length}件（新しい順）`} />
+      <ul className="divide-y divide-slate-100 px-4 pb-2 sm:px-5 dark:divide-navy-800">
+        {others.map((i) => (
+          <li key={i.id}>
+            <a href={`#/helpdesk/${i.id}`} className="flex min-h-12 items-center gap-2 py-2 text-sm">
+              <span className="font-mono text-xs text-slate-500">{i.number}</span>
+              <span className="min-w-0 flex-1 truncate">{i.title}</span>
+              <span className="text-xs text-slate-500">{INQUIRY_STATUS_LABEL[i.status]}</span>
+            </a>
+          </li>
+        ))}
+      </ul>
+    </Card>
   );
 }

@@ -7,23 +7,9 @@ import { ArrowRight, Boxes, PackageCheck } from 'lucide-react';
 import { useAppData } from '../../app/AppData';
 import type { DocumentRecord } from '../../domain/documents/types';
 import { generateId } from '../../domain/id';
-import type { Item } from '../../domain/inventory/types';
+import { guessItem } from '../../domain/documents/links';
 import { Modal, ModalCancelButton } from '../../ui/Modal';
 import { Button, Card, CardHeader, SelectField } from '../../ui/primitives';
-
-const norm = (s: string) => s.normalize('NFKC').toLowerCase().replace(/\s+/g, '');
-
-/** 明細の品名から在庫の品目を推定 (品名・型番の包含)。確信が持てなければ未選択のまま */
-export function guessItem(lineName: string, items: Item[]): Item | null {
-  const n = norm(lineName);
-  if (!n) return null;
-  const hits = items.filter((i) => {
-    const name = norm(i.name.replace(/（.*?）|\(.*?\)/g, ''));
-    const model = norm(i.model);
-    return (name.length >= 2 && (n.includes(name) || name.includes(n))) || (model.length >= 3 && n.includes(model));
-  });
-  return hits.length === 1 ? hits[0]! : null;
-}
 
 export function InventoryHandoffCard({ doc }: { doc: DocumentRecord }) {
   const { data, run } = useAppData();

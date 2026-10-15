@@ -2,7 +2,7 @@
  * 実ブラウザでのDBマイグレーション検証 (Phase 1 版で作ったデータを Phase 2 版で開く)。
  *
  * 実行方法 (同一オリジンに旧版・新版を配置する必要があるため通常のテストでは skip):
- *   1. Phase 1〜4 を <site>/p1/〜/p4/ にビルド (vite build --outDir。検証したい組み合わせだけでよい)
+ *   1. Phase 1〜5 を <site>/p1/〜/p5/ にビルド (vite build --outDir。検証したい組み合わせだけでよい)
  *   2. <site> を静的配信 (例: python3 -m http.server 4180 -d <site>)
  *   3. MIGRATION_SITE_URL=http://localhost:4180 npx playwright test e2e/migration.spec.ts --project=iphone
  */
@@ -140,4 +140,38 @@ test('[Migration] Phase 3 のデータ（社員・在庫・入出庫履歴）を
   await page.getByTestId('import-manual').click();
   await expect(page.getByTestId('doc-number')).toBeVisible();
   expect(await counts()).toMatchObject({ employees: p3.employees, stockMovements: p3.stockMovements, documents: 1 });
+});
+
+test('[Migration] Phase 4 のデータ（社員・在庫・書類）を保持したまま Phase 5 に移行できる', async ({ page }) => {
+  test.skip(!SITE, 'MIGRATION_SITE_URL が未設定のため skip');
+  const counts = () =>
+    page.evaluate(async () => {
+      const db = await new Promise<IDBDatabase>((r) => {
+        const q = indexedDB.open('workcore');
+        q.onsuccess = () => r(q.result);
+      });
+      const has = (s: string) => db.objectStoreNames.contains(s);
+      const count = (s: string) => (has(s) ? new Promise<number>((r) => { const c = db.transaction(s).objectStore(s).count(); c.onsuccess = () => r(c.result); }) : Promise.resolve(-1));
+      const v = { version: db.version, employees: await count('employees'), tasks: await count('tasks'), inquiries: await count('inquiries'), items: await count('items'), stockMovements: await count('stockMovements'), documents: await count('documents'), settings: await count('settings') };
+      db.close();
+      return v;
+    });
+  // Phase 4 版: 書類を1件登録
+  await page.goto(`${SITE}/p4/#/documents/new`);
+  await page.getByLabel('書類の種類').selectOption({ label: '領収書' });
+  await page.getByTestId('import-manual').click();
+  await expect(page.getByTestId('doc-number')).toBeVisible();
+  const p4 = await counts();
+  expect(p4.version).toBe(4);
+  expect(p4.settings).toBe(-1);
+
+  // Phase 5 版で開く → v5 へ自動移行。既存データはそのまま、設定ストアが追加される
+  await page.goto(`${SITE}/p5/#/automation`);
+  await expect(page.getByTestId('rule-settings')).toBeVisible();
+  const p5 = await counts();
+  expect(p5).toMatchObject({ version: 5, employees: p4.employees, inquiries: p4.inquiries, items: p4.items, stockMovements: p4.stockMovements, documents: 1, settings: 0 });
+  // 既存社員の詳細 (連絡先なし) も表示できる
+  await page.goto(`${SITE}/p5/#/employees`);
+  await page.locator('a[href^="#/employees/"]:visible').first().click();
+  await expect(page.getByTestId('back-link')).toBeVisible();
 });

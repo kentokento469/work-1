@@ -195,7 +195,7 @@ describe('バックアップ・CSV', () => {
     expect(csv.startsWith(UTF8_BOM)).toBe(true);
     expect(csv).toContain('"備考,カンマ""引用""\n改行"');
     expect(csv).toContain("'=危険 入力");
-    expect(csv.split('\r\n')[0]).toBe(`${UTF8_BOM}社員番号,氏名,所属部署,役職,雇用区分,入社日,退職日,在籍ステータス,備考`);
+    expect(csv.split('\r\n')[0]).toBe(`${UTF8_BOM}社員番号,氏名,所属部署,役職,雇用区分,入社日,退職日,在籍ステータス,備考,電話番号,メールアドレス,郵便番号,住所`);
     expect(tasksToCsv(snap).startsWith(UTF8_BOM)).toBe(true);
   });
 });

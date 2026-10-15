@@ -123,6 +123,9 @@ export function Badge({ tone = 'gray', children, icon: Icon, className }: { tone
 
 // ---------- Form fields ----------
 
+/** 入力欄の共通スタイル (スマート入力の部品でも同じ見た目にする) */
+export const inputClass = (error?: boolean, extra?: string) => cx(fieldBase, 'h-11', error ? fieldErr : fieldOk, extra);
+
 const fieldBase =
   'block w-full rounded-lg border bg-white px-3 text-slate-900 shadow-sm transition-colors placeholder:text-slate-400 focus:outline-none focus:ring-2 dark:bg-navy-950 dark:text-slate-100';
 const fieldOk = 'border-slate-300 focus:border-navy-500 focus:ring-navy-500/25 dark:border-navy-700';

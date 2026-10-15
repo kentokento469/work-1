@@ -1,5 +1,7 @@
+import { formatAddress } from '../ui/SmartInputs';
+import { BackLink } from '../app/BackLink';
 import { useState } from 'react';
-import { ArrowLeft, ClipboardList, Headset, Pencil, Plus, Trash2, UserX, Zap } from 'lucide-react';
+import { ClipboardList, Headset, Pencil, Plus, Trash2, UserX, Zap } from 'lucide-react';
 import { InquiryStatusBadge } from '../features/helpdesk/parts';
 import { EmployeeEquipmentCard } from '../features/inventory/RelatedEquipment';
 import { RelatedDocumentsCard } from '../features/documents/light';
@@ -51,15 +53,15 @@ export function EmployeeDetailPage({ employeeId }: { employeeId: string }) {
     ['雇用区分', emp.employmentType],
     ['入社日', `${formatDateJa(emp.hireDate)}${emp.status === 'pending' && days >= 0 ? `（あと${days}日）` : ''}`],
     ['退職日', formatDateJa(emp.retireDate)],
+    ...(emp.contact?.phone ? [['電話番号', emp.contact.phone] as [string, string]] : []),
+    ...(emp.contact?.email ? [['メール', emp.contact.email] as [string, string]] : []),
+    ...(emp.contact && (emp.contact.postalCode || emp.contact.prefecture) ? [['住所', formatAddress(emp.contact)] as [string, string]] : []),
     ['最終更新', formatDateTimeJa(emp.updatedAt)],
   ];
 
   return (
     <>
-      <a href="#/employees" className="-ml-2 mb-3 inline-flex min-h-10 items-center gap-1 rounded-lg px-2 text-sm text-slate-500 hover:text-slate-800 dark:hover:text-slate-200">
-        <ArrowLeft className="size-4" aria-hidden />
-        社員一覧
-      </a>
+      <BackLink href="#/employees">社員一覧</BackLink>
 
       <Card className="p-4 sm:p-6">
         <div className="flex items-start gap-4">

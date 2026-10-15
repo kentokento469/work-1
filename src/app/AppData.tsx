@@ -3,13 +3,14 @@
  * 変更操作は必ず run() を通し、サービス層で永続化 → スナップショット再読込 → トースト表示 を行う。
  * これによりタスクのステータス変更などがダッシュボードへ即時反映される。
  */
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { openWorkCoreDB } from '../data/db';
 import { computeDashboard, type DashboardStats } from '../domain/analytics';
 import { computeHelpdeskStats, type HelpdeskStats } from '../domain/helpdesk/analytics';
 import { computeAllStock, type StockStatus } from '../domain/inventory/stock';
 import { computeInventoryStats, type InventoryStats } from '../domain/inventory/analytics';
-import { INVENTORY_AUTOMATIONS } from '../automation/inventoryAutomations';
+import { ALL_AUTOMATIONS } from '../automation/registry';
+import { readAutomationSettings, ruleSetting } from '../automation/settings';
 import { pendingProposals, type AutomationProposal } from '../automation/engine';
 import type { DataSnapshot, Department, Employee } from '../domain/types';
 import { AppError, WorkCoreService } from '../services/workcoreService';
@@ -62,6 +63,32 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   const toast = useToast();
   const [state, setState] = useState<LoadState>({ status: 'loading' });
 
+  /**
+   * 「自動で実行」に設定された自動化を実行する。データが変わるたびに呼ぶ。
+   * 実行中に再度呼ばれた場合は、終わってからもう一度だけ実行する (同時実行しない)。二重実行は処理履歴のキーで防ぐ
+   */
+  const autoState = useRef({ running: false, again: false });
+  const runAuto = useCallback(async (svc: WorkCoreService) => {
+    if (autoState.current.running) {
+      autoState.current.again = true;
+      return;
+    }
+    autoState.current.running = true;
+    try {
+      do {
+        autoState.current.again = false;
+        const done = await svc.runAutoAutomations().catch(() => []);
+        if (done.length) {
+          setState({ status: 'ready', service: svc, data: await svc.loadSnapshot() });
+          toast.info(`自動化を実行しました：${done.map((d) => d.title).join('、')}（処理履歴は自動化センター）`);
+        }
+      } while (autoState.current.again);
+    } finally {
+      autoState.current.running = false;
+    }
+  }, [toast]);
+
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -71,6 +98,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         if (cancelled) return;
         setState({ status: 'ready', service, data });
         if (seeded) toast.info('デモデータを読み込みました。自由に操作してお試しください。');
+        void runAuto(service);
       } catch (e) {
         if (!cancelled)
           setState({
@@ -85,7 +113,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [toast]);
+  }, [toast, runAuto]);
 
   const service = state.status === 'ready' ? state.service : null;
 
@@ -93,7 +121,8 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     if (!service) return;
     const data = await service.loadSnapshot();
     setState({ status: 'ready', service, data });
-  }, [service]);
+    void runAuto(service);
+  }, [service, runAuto]);
 
   const run = useCallback(
     async <T,>(action: (s: WorkCoreService) => Promise<T>, successMessage?: string | ((r: T) => string), opts?: RunOptions<T>): Promise<T> => {
@@ -141,7 +170,11 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       helpdeskStats: computeHelpdeskStats(state.data.inquiries, state.data.inquiryCategories, today),
       stock,
       inventoryStats: computeInventoryStats(state.data, today),
-      proposals: pendingProposals(INVENTORY_AUTOMATIONS, { data: state.data, today, stock }),
+      proposals: (() => {
+        const settings = readAutomationSettings(state.data);
+        // 無効にした自動化は判定しない。自動実行の自動化は、承認が必要な操作を含む提案だけを一覧に残す
+        return pendingProposals(ALL_AUTOMATIONS, { data: state.data, today, stock }, (id) => ruleSetting(ALL_AUTOMATIONS.find((d) => d.id === id)!, settings).enabled);
+      })(),
       today,
       deptById: new Map(state.data.departments.map((d) => [d.id, d])),
       empById: new Map(state.data.employees.map((e) => [e.id, e])),

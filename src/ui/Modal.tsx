@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useId, useRef, useSt
 import { createPortal } from 'react-dom';
 import { AlertTriangle, X } from 'lucide-react';
 import { Button, IconButton } from './primitives';
+import { pushModalEntry } from '../app/router';
 
 interface ModalProps {
   open: boolean;
@@ -57,6 +58,15 @@ export function Modal({ open, onClose, title, description, children, footer, siz
       if (e.key === 'Escape') requestClose();
     };
     window.addEventListener('keydown', onKey);
+    // ブラウザの戻る・スワイプ戻りでは画面より先にモーダルを閉じる。未保存の変更があれば閉じずに破棄確認を出す
+    const releaseHistory = pushModalEntry(() => {
+      if (state.current.dirty) {
+        setConfirmDiscard(true);
+        return false;
+      }
+      state.current.onClose();
+      return true;
+    });
     // PCでは最初の入力欄へフォーカス。スマホではキーボードが勝手に開かないようパネル自体へ
     const isTouch = window.matchMedia('(pointer: coarse)').matches;
     const first = panelRef.current?.querySelector<HTMLElement>('input:not([type=checkbox]), select, textarea');
@@ -65,6 +75,7 @@ export function Modal({ open, onClose, title, description, children, footer, siz
     return () => {
       document.body.style.overflow = prevOverflow;
       window.removeEventListener('keydown', onKey);
+      releaseHistory();
       prevFocus?.focus?.();
     };
   }, [open, requestClose]);

@@ -31,8 +31,8 @@ import {
 } from '../domain/types';
 
 export const BACKUP_APP_ID = 'WorkCore';
-export const BACKUP_SCHEMA_VERSION = 4;
-const SUPPORTED_VERSIONS = [1, 2, 3, 4];
+export const BACKUP_SCHEMA_VERSION = 5;
+const SUPPORTED_VERSIONS = [1, 2, 3, 4, 5];
 
 /** 書類の元ファイル (Base64)。バックアップに含めるかは出力時に選べる */
 export interface BackupDocumentFile {
@@ -127,6 +127,7 @@ function checkEmployee(v: unknown): v is Employee {
     (v.retireDate === null || isValidISODate(v.retireDate)) &&
     isEmployeeStatus(v.status) &&
     isStr(v.notes) &&
+    (v.contact === undefined || (isObj(v.contact) && Object.values(v.contact).every(isStr))) &&
     isStr(v.createdAt) &&
     isStr(v.updatedAt)
   );
@@ -304,6 +305,8 @@ export function validateBackup(raw: unknown): BackupValidation {
   if (version < 3) Object.assign(d, emptyInventory(true));
   // v1〜v3 → v4 の補完 (書類は空)
   if (version < 4) d.documents = [];
+  // v1〜v4 → v5 の補完 (設定は既定値)
+  if (version < 5) d.settings = [];
 
   const collections = [
     ['departments', '部署', checkDepartment],
@@ -327,6 +330,7 @@ export function validateBackup(raw: unknown): BackupValidation {
     ['equipmentRules', '入社時の必要機器ルール', checkEquipmentRule],
     ['automationRuns', '自動化の処理履歴', checkRun],
     ['documents', '書類', checkDocument],
+    ['settings', '設定', (v: unknown) => isObj(v) && isStr(v.id) && isStr(v.updatedAt) && 'value' in v],
   ] as const;
 
   for (const [key, label, check] of collections) {

@@ -7,7 +7,7 @@
 import { buildOnboardingPlan, materializePlan, type OnboardingPlan, type PlanItemOverride } from '../automation/onboardingEngine';
 import { today as todayISO } from '../domain/date';
 import { generateId, nowISO } from '../domain/id';
-import { normalizeEmployeeNumber, validateEmployee, validateRule, validateTask, type EmployeeInput, type RuleInput, type TaskInput } from '../domain/validation';
+import { cleanContact, normalizeEmployeeNumber, validateEmployee, validateRule, validateTask, type EmployeeInput, type RuleInput, type TaskInput } from '../domain/validation';
 import { TASK_STATUS_LABEL, type DataSnapshot, type Department, type Employee, type OnboardingRule, type Task, type TaskStatus } from '../domain/types';
 import type { BackupFile } from '../data/backup';
 import { DATA_STORES, STORE_NAMES, type WorkCoreDB } from '../data/db';
@@ -17,6 +17,10 @@ import { createDemoData, createHelpdeskDemoData } from '../demo/demoData';
 import { createDefaultInquiryCategories } from '../domain/helpdesk/defaults';
 import { AppError, abortWith, appendInquiryEvent, fieldError, inquiryEvent, logActivity, type WriteTx } from './common';
 import { HelpdeskService } from './helpdeskService';
+import { ALL_AUTOMATIONS } from '../automation/registry';
+import { pendingProposals } from '../automation/engine';
+import { AUTOMATION_SETTING_ID, readAutomationSettings, ruleSetting, type RuleSetting } from '../automation/settings';
+import { computeAllStock } from '../domain/inventory/stock';
 import { DocumentService } from './documentService';
 import type { DocumentFile } from '../domain/documents/types';
 
@@ -96,9 +100,11 @@ export class WorkCoreService {
       position: input.position.trim(),
       notes: input.notes.trim(),
       retireDate: input.retireDate || null,
+      contact: cleanContact(input.contact),
       createdAt: now,
       updatedAt: now,
     };
+    if (!employee.contact) delete employee.contact;
     await tx.objectStore('employees').add(employee);
     await logActivity(tx, 'employee', 'create', `社員「${employee.name}」(${employee.employeeNumber}) を登録しました`, employee.id);
     await tx.done;
@@ -119,8 +125,10 @@ export class WorkCoreService {
       position: input.position.trim(),
       notes: input.notes.trim(),
       retireDate: input.retireDate || null,
+      contact: cleanContact(input.contact),
       updatedAt: nowISO(),
     };
+    if (!employee.contact) delete employee.contact;
     await tx.objectStore('employees').put(employee);
     await logActivity(tx, 'employee', 'update', `社員「${employee.name}」の情報を更新しました`, id);
     await tx.done;
@@ -463,10 +471,13 @@ export class WorkCoreService {
   /** 全データを削除し、部署・ルール・カテゴリだけの空の状態にする */
   async clearBusinessData(): Promise<void> {
     const demo = createDemoData(this.today());
+    // 設定 (自動化ルールなど) は業務データではないので残す
+    const settings = await this.db.getAll('settings');
     await this.replaceAll(
       {
         ...emptyInventory(true),
         documents: [],
+        settings,
         departments: demo.departments,
         rules: demo.rules,
         employees: [],
@@ -502,6 +513,48 @@ export class WorkCoreService {
     await logActivity(tx, 'data', 'demo', `ヘルプデスクのデモデータ（問い合わせ${demo.inquiries.length}件・FAQ${demo.faqs.length}件）を追加しました`);
     await tx.done;
     return demo.inquiries.length;
+  }
+
+  // ---------- 設定・自動化 (Phase 5) ----------
+
+  /** 自動化ルールの有効/無効・実行方法を保存する */
+  async saveRuleSetting(automationId: string, setting: RuleSetting): Promise<void> {
+    const def = ALL_AUTOMATIONS.find((d) => d.id === automationId);
+    if (!def) throw new AppError('不明な自動化です');
+    if (setting.mode === 'auto' && !def.autoCapable) throw new AppError('この自動化は確認が必要なため、自動実行にはできません');
+    const tx = this.db.transaction(['settings', 'activities'], 'readwrite');
+    const current = await tx.objectStore('settings').get(AUTOMATION_SETTING_ID);
+    const value = { ...((current?.value as Record<string, RuleSetting> | undefined) ?? {}), [automationId]: setting };
+    await tx.objectStore('settings').put({ id: AUTOMATION_SETTING_ID, value, updatedAt: nowISO() });
+    await logActivity(tx, 'automation', 'setting', `自動化「${def.name}」を${setting.enabled ? (setting.mode === 'auto' ? '自動実行' : '確認してから実行') : '無効'}にしました`);
+    await tx.done;
+  }
+
+  /**
+   * 「自動で実行」に設定された自動化を実行する (データが変わるたびに画面から呼ぶ)。
+   * 承認が不要な操作 (タスク作成など) だけの提案に限り、処理履歴に「自動」として記録する。
+   * 同じ提案は処理履歴のキーで一度しか実行されない (再読み込み・連続呼び出しでも二重実行しない)
+   */
+  async runAutoAutomations(): Promise<{ title: string; results: string[] }[]> {
+    const data = await this.loadSnapshot();
+    const settings = readAutomationSettings(data);
+    const defs = ALL_AUTOMATIONS.filter((d) => {
+      const s = ruleSetting(d, settings);
+      return s.enabled && s.mode === 'auto';
+    });
+    if (!defs.length) return [];
+    const proposals = pendingProposals(defs, { data, today: this.today(), stock: computeAllStock(data.items, data) });
+    const done: { title: string; results: string[] }[] = [];
+    for (const p of proposals) {
+      if (p.actions.some((a) => a.requiresApproval)) continue;
+      try {
+        const r = await this.inventory.applyProposal(p.automationId, p.key, p.actions.map((a) => a.id), { auto: true });
+        done.push({ title: p.title, results: r.results });
+      } catch {
+        // 処理済み・状況の変化は失敗として処理履歴に残っている (画面の処理を止めない)
+      }
+    }
+    return done;
   }
 
   async recordExport(message: string): Promise<void> {

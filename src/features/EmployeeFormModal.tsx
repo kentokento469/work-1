@@ -6,6 +6,10 @@ import { normalizeEmployeeNumber, suggestEmployeeStatus, validateEmployee, type 
 import { AppError } from '../services/workcoreService';
 import { Modal, ModalCancelButton } from '../ui/Modal';
 import { Button, SelectField, TextAreaField, TextField } from '../ui/primitives';
+import { EmailField, PhoneField, PostalAddressFields, SuggestField, emptyAddress, finalizePhone } from '../ui/SmartInputs';
+import type { EmployeeContact } from '../domain/types';
+
+const emptyContact = (): EmployeeContact => ({ email: '', phone: '', ...emptyAddress() });
 
 /** 既存の社員番号から次の番号を提案する (例: A0104 → A0105) */
 function suggestNextNumber(employees: Employee[]): string {
@@ -47,6 +51,7 @@ export function EmployeeFormModal({
             retireDate: employee.retireDate,
             status: employee.status,
             notes: employee.notes,
+            contact: { ...emptyContact(), ...employee.contact },
           }
         : {
             employeeNumber: suggestNextNumber(data.employees),
@@ -58,6 +63,7 @@ export function EmployeeFormModal({
             retireDate: null,
             status: 'pending',
             notes: '',
+            contact: emptyContact(),
           },
     // モーダルを開くたびに初期化する (open を依存に含める)
     [employee, open, data.employees],
@@ -67,12 +73,15 @@ export function EmployeeFormModal({
   const [errors, setErrors] = useState<FieldErrors<EmployeeInput>>({});
   const [statusTouched, setStatusTouched] = useState(false);
   const [saving, setSaving] = useState(false);
+  // 連絡先欄の開閉は利用者の操作に任せる (入力を消しても勝手に閉じない)
+  const [contactOpen, setContactOpen] = useState(false);
 
   useEffect(() => {
     if (open) {
       setForm(initial);
       setErrors({});
       setStatusTouched(!!employee);
+      setContactOpen(Object.values(initial.contact ?? {}).some(Boolean));
     }
   }, [open, initial, employee]);
 
@@ -93,10 +102,23 @@ export function EmployeeFormModal({
     const dup = data.employees.find((e) => e.id !== employee?.id && normalizeEmployeeNumber(e.employeeNumber) === n);
     return dup ? `社員番号「${n}」は ${dup.name} さんが使用中です` : undefined;
   }, [form.employeeNumber, data.employees, employee]);
+  // 同姓同名は登録できるが、二重登録の可能性を知らせる (空白の有無は区別しない)
+  const nameWarning = useMemo(() => {
+    const n = form.name.replace(/[\s　]/g, '');
+    if (!n || employee) return undefined;
+    const dup = data.employees.find((e) => e.name.replace(/[\s　]/g, '') === n);
+    return dup ? `同じ氏名の社員がいます（${dup.employeeNumber}・${data.departments.find((d) => d.id === dup.departmentId)?.name ?? ''}）。二重登録でないか確認してください` : undefined;
+  }, [form.name, data.employees, data.departments, employee]);
+  const contact = form.contact ?? emptyContact();
+  // 住所検索は非同期で終わるため、その間に入力された他の項目を消さないよう常に最新の値に重ねる
+  const setContact = (patch: Partial<EmployeeContact>) => setForm((f) => ({ ...f, contact: { ...emptyContact(), ...f.contact, ...patch } }));
 
   const submit = async (ev: FormEvent) => {
     ev.preventDefault();
-    const v = validateEmployee(form, { existing: data.employees, departmentIds: data.departments.map((d) => d.id), selfId: employee?.id });
+    const phone = await finalizePhone(form.contact?.phone ?? '');
+    const input: EmployeeInput = form.contact ? { ...form, contact: { ...form.contact, phone } } : form;
+    if (form.contact && phone !== form.contact.phone) setContact({ phone });
+    const v = validateEmployee(input, { existing: data.employees, departmentIds: data.departments.map((d) => d.id), selfId: employee?.id });
     if (!v.ok) {
       setErrors(v.errors);
       return;
@@ -104,8 +126,8 @@ export function EmployeeFormModal({
     setSaving(true);
     try {
       const saved = await run(
-        (s) => (employee ? s.updateEmployee(employee.id, form) : s.createEmployee(form)),
-        employee ? '社員情報を更新しました' : `${form.name.trim()}さんを登録しました`,
+        (s) => (employee ? s.updateEmployee(employee.id, input) : s.createEmployee(input)),
+        employee ? '社員情報を更新しました' : `${input.name.trim()}さんを登録しました`,
       );
       onClose();
       onSaved?.(saved, !employee);
@@ -144,7 +166,7 @@ export function EmployeeFormModal({
           autoCapitalize="characters"
           inputMode="text"
         />
-        <TextField label="氏名" required value={form.name} onChange={(e) => set('name', e.target.value)} error={errors.name} placeholder="例：山田 太郎" autoComplete="off" />
+        <TextField label="氏名" required value={form.name} onChange={(e) => set('name', e.target.value)} error={errors.name} hint={nameWarning} placeholder="例：山田 太郎" autoComplete="off" />
         <SelectField
           label="所属部署"
           required
@@ -154,7 +176,7 @@ export function EmployeeFormModal({
           placeholder="選択してください"
           error={errors.departmentId}
         />
-        <TextField label="役職" value={form.position} onChange={(e) => set('position', e.target.value)} error={errors.position} placeholder="例：主任（任意）" />
+        <SuggestField label="役職" value={form.position} onChange={(v) => set('position', v)} error={errors.position} placeholder="例：主任（任意）" options={data.employees.map((e) => e.position)} />
         <SelectField
           label="雇用区分"
           required
@@ -184,6 +206,21 @@ export function EmployeeFormModal({
           error={errors.retireDate}
           hint="在籍中は空欄"
         />
+        <details open={contactOpen || !!errors.contact} onToggle={(e) => setContactOpen(e.currentTarget.open)} className="rounded-xl border border-slate-200 p-3 sm:col-span-2 dark:border-navy-700" data-testid="contact-section">
+          <summary className="flex min-h-10 cursor-pointer items-center text-sm font-semibold">連絡先・住所（任意）</summary>
+          {errors.contact && (
+            <p className="mb-2 text-xs text-red-600 dark:text-red-400" role="alert">
+              {errors.contact}
+            </p>
+          )}
+          <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <PhoneField label="電話番号" value={contact.phone} onChange={(v) => setContact({ phone: v })} testId="employee-phone" />
+            <EmailField label="メールアドレス" value={contact.email} onChange={(v) => setContact({ email: v })} testId="employee-email" />
+            <div className="sm:col-span-2">
+              <PostalAddressFields value={contact} onChange={(a) => setContact({ postalCode: a.postalCode, prefecture: a.prefecture, city: a.city, town: a.town, addressLine: a.addressLine })} idPrefix="employee-addr" />
+            </div>
+          </div>
+        </details>
         <TextAreaField label="備考" value={form.notes} onChange={(e) => set('notes', e.target.value)} error={errors.notes} wrapClassName="sm:col-span-2" maxLength={1000} />
       </form>
     </Modal>

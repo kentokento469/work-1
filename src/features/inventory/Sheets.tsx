@@ -4,6 +4,7 @@
  * - 確定前に「変更後の在庫」を表示 (結果のプレビュー)
  * - シートを開くたびに requestId を発行し、連打・再送でも1回だけ処理する
  */
+import { AmountField, EmailField, PhoneField, SuggestField, finalizePhone } from '../../ui/SmartInputs';
 import { useEffect, useLayoutEffect, useMemo, useState, type FormEvent } from 'react';
 import { ArrowDownToLine, ArrowRightLeft, ArrowUpFromLine, Save, SlidersHorizontal, UserCheck, Undo2 } from 'lucide-react';
 import { useAppData } from '../../app/AppData';
@@ -382,10 +383,10 @@ export function ItemFormModal({ open, onClose, item }: { open: boolean; onClose:
           ]}
           error={errors.tracking}
         />
-        <TextField label="メーカー" value={f.maker} onChange={(e) => setF({ ...f, maker: e.target.value })} />
+        <SuggestField label="メーカー" value={f.maker} onChange={(v) => setF({ ...f, maker: v })} options={data.items.map((i) => i.maker)} />
         <TextField label="型番" value={f.model} onChange={(e) => setF({ ...f, model: e.target.value })} />
-        <TextField label="管理単位" required value={f.unit} onChange={(e) => setF({ ...f, unit: e.target.value })} error={errors.unit} placeholder="個・台・箱" />
-        <TextField label="参考単価（円）" inputMode="numeric" value={Number.isNaN(f.unitPrice) ? '' : String(f.unitPrice)} onChange={num('unitPrice')} error={errors.unitPrice} hint="概算・発注書の初期値に使用（会計上の評価額ではありません）" />
+        <SuggestField label="管理単位" required value={f.unit} onChange={(v) => setF({ ...f, unit: v })} error={errors.unit} placeholder="個・台・箱" options={['個', '台', '本', '冊', '枚', '箱', 'セット', ...data.items.map((i) => i.unit)]} />
+        <AmountField label="参考単価" value={Number.isNaN(f.unitPrice) ? '' : String(f.unitPrice)} onChange={(v) => setF((x) => ({ ...x, unitPrice: v === '' ? NaN : Number(v) }))} error={errors.unitPrice} hint="概算・発注書の初期値に使用（会計上の評価額ではありません）" testId="item-price" />
         <TextField label="最低在庫数（発注点）" inputMode="numeric" value={Number.isNaN(f.minStock) ? '' : String(f.minStock)} onChange={num('minStock')} error={errors.minStock} hint="見込み在庫がこれを下回ると発注候補を作成" />
         <TextField label="適正在庫数" inputMode="numeric" value={Number.isNaN(f.targetStock) ? '' : String(f.targetStock)} onChange={num('targetStock')} error={errors.targetStock} hint="発注候補はこの数まで補充する量を推奨" />
         <SelectField label="既定の保管場所" value={f.defaultLocationId ?? ''} onChange={(e) => setF({ ...f, defaultLocationId: e.target.value || null })} options={data.locations.map((l) => ({ value: l.id, label: l.name }))} placeholder="（なし）" />
@@ -485,6 +486,7 @@ export function SupplierFormModal({ open, onClose, supplier }: { open: boolean; 
     e.preventDefault();
     try {
       const { id: _id, ...rest } = f;
+      rest.phone = await finalizePhone(rest.phone);
       await run((s) => s.inventory.saveSupplier(rest, supplier?.id), '仕入先を保存しました');
       onClose();
     } catch (err) {
@@ -511,8 +513,8 @@ export function SupplierFormModal({ open, onClose, supplier }: { open: boolean; 
         <TextField label="仕入先名" required value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} error={errors.name} wrapClassName="sm:col-span-2" />
         <TextField label="担当者" value={f.contactName} onChange={(e) => setF({ ...f, contactName: e.target.value })} />
         <TextField label="標準納期（日）" inputMode="numeric" value={String(f.leadTimeDays)} onChange={(e) => setF({ ...f, leadTimeDays: Number(e.target.value) })} error={errors.leadTimeDays} />
-        <TextField label="電話" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} />
-        <TextField label="メール" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
+        <PhoneField label="電話" value={f.phone} onChange={(v) => setF((x) => ({ ...x, phone: v }))} testId="supplier-phone" />
+        <EmailField label="メール" value={f.email} onChange={(v) => setF((x) => ({ ...x, email: v }))} hint="架空の仕入先は .example ドメインを使用" />
         <label className="flex min-h-11 items-center gap-2 text-sm sm:col-span-2">
           <input type="checkbox" checked={f.active} onChange={(e) => setF({ ...f, active: e.target.checked })} className="size-5 accent-navy-700" />
           取引中（発注書の仕入先に選べる）

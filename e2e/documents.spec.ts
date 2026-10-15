@@ -226,7 +226,7 @@ test('[Phase4] CSV出力（全件・明細）・バックアップ（元ファ�
   const path = join(dir, `backup-${Date.now()}.json`);
   await dl.saveAs(path);
   const backup = JSON.parse(readFileSync(path, 'utf8'));
-  expect(backup.schemaVersion).toBe(4);
+  expect(backup.schemaVersion).toBe(5);
   expect(backup.data.documents).toHaveLength(2);
   expect(backup.files).toHaveLength(2);
   await page.getByRole('button', { name: /全削除/ }).click();

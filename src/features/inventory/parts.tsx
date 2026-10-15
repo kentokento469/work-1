@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ChevronDown, Cpu, Info, Minus, Plus, ShieldCheck, Sparkles, Zap } from 'lucide-react';
 import { useAppData } from '../../app/AppData';
 import type { AutomationProposal } from '../../automation/engine';
-import { INVENTORY_AUTOMATIONS } from '../../automation/inventoryAutomations';
+import { ALL_AUTOMATIONS } from '../../automation/registry';
 import { ASSET_STATUS_LABEL, type AssetStatus, type Item } from '../../domain/inventory/types';
 import type { StockStatus } from '../../domain/inventory/stock';
 import { Badge, Button, cx, type Tone } from '../../ui/primitives';
@@ -78,7 +78,7 @@ export function Stepper({ value, onChange, min = 1, max, label }: { value: numbe
  */
 export function ProposalCard({ proposal, compact }: { proposal: AutomationProposal; compact?: boolean }) {
   const { run } = useAppData();
-  const def = INVENTORY_AUTOMATIONS.find((d) => d.id === proposal.automationId);
+  const def = ALL_AUTOMATIONS.find((d) => d.id === proposal.automationId);
   const [selected, setSelected] = useState<Set<string>>(() => new Set(proposal.actions.map((a) => a.id)));
   const [open, setOpen] = useState(!compact);
   const [busy, setBusy] = useState(false);

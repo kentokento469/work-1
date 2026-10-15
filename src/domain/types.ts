@@ -52,8 +52,22 @@ export interface Employee {
   retireDate: ISODate | null;
   status: EmployeeStatus;
   notes: string;
+  /** 連絡先・住所 (Phase 5 で追加。任意・既存データには無い) */
+  contact?: EmployeeContact;
   createdAt: ISODateTime;
   updatedAt: ISODateTime;
+}
+
+export interface EmployeeContact {
+  email: string;
+  /** 整形済みの文字列 (例: 090-1234-5678) */
+  phone: string;
+  /** 例: 254-0822 */
+  postalCode: string;
+  prefecture: string;
+  city: string;
+  town: string;
+  addressLine: string;
 }
 
 export const TASK_STATUSES = ['todo', 'in_progress', 'done', 'on_hold'] as const;
@@ -268,4 +282,13 @@ export interface DataSnapshot {
   automationRuns: AutomationRun[];
   // Phase 4: 書類 (元ファイル本体は含まない)
   documents: DocumentRecord[];
+  // Phase 5: 設定値 (自動化ルールの有効/無効・実行方法など)
+  settings: SettingRecord[];
+}
+
+/** アプリの設定値。id ごとに1件 (例: 'automation') */
+export interface SettingRecord {
+  id: string;
+  value: unknown;
+  updatedAt: string;
 }

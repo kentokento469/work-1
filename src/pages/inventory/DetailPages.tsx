@@ -2,10 +2,10 @@
  * 在庫の詳細画面: 品目詳細 / 資産詳細 / 発注書詳細 / 棚卸。
  */
 import { RelatedDocumentsCard } from '../../features/documents/light';
+import { BackLink } from '../../app/BackLink';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   ArrowDownToLine,
-  ArrowLeft,
   ArrowRightLeft,
   ArrowUpFromLine,
   Ban,
@@ -37,12 +37,7 @@ import { Badge, Button, Card, CardHeader, EmptyState, PageHeader, SelectField, T
 import { PoStatusBadge } from './InventoryPage';
 
 function Back({ href, label }: { href: string; label: string }) {
-  return (
-    <a href={href} className="-ml-2 mb-3 inline-flex min-h-10 items-center gap-1 rounded-lg px-2 text-sm text-slate-500 hover:text-slate-800 dark:hover:text-slate-200">
-      <ArrowLeft className="size-4" aria-hidden />
-      {label}
-    </a>
-  );
+  return <BackLink href={href}>{label}</BackLink>;
 }
 
 // ============================ 品目詳細 ============================

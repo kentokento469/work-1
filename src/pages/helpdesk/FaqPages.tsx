@@ -3,7 +3,8 @@
  * 一覧は検索語との関連度順に並べ、カテゴリ・公開状態で絞り込める。
  */
 import { useMemo, useState } from 'react';
-import { ArrowLeft, BookOpen, BookOpenCheck, ChevronRight, FileQuestion, Headset, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
+import { BackLink } from '../../app/BackLink';
+import { BookOpen, BookOpenCheck, ChevronRight, FileQuestion, Headset, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
 import { useAppData } from '../../app/AppData';
 import { useQueryState } from '../../app/hooks';
 import { navigate } from '../../app/router';
@@ -120,10 +121,7 @@ export function FaqDetailPage({ faqId }: { faqId: string }) {
   const source = faq.sourceInquiryId ? data.inquiries.find((i) => i.id === faq.sourceInquiryId) : undefined;
   return (
     <>
-      <a href="#/faq" className="-ml-2 mb-3 inline-flex min-h-10 items-center gap-1 rounded-lg px-2 text-sm text-slate-500 hover:text-slate-800 dark:hover:text-slate-200">
-        <ArrowLeft className="size-4" aria-hidden />
-        FAQ一覧
-      </a>
+      <BackLink href="#/faq">FAQ一覧</BackLink>
       <Card className="p-4 sm:p-6">
         <div className="flex flex-wrap items-center gap-2">
           <CategoryBadge category={category} />

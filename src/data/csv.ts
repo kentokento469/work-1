@@ -35,8 +35,12 @@ export function employeesToCsv(data: Pick<DataSnapshot, 'employees' | 'departmen
       e.retireDate ?? '',
       EMPLOYEE_STATUS_LABEL[e.status],
       e.notes,
+      e.contact?.phone ?? '',
+      e.contact?.email ?? '',
+      e.contact?.postalCode ?? '',
+      e.contact ? `${e.contact.prefecture}${e.contact.city}${e.contact.town}${e.contact.addressLine ? ` ${e.contact.addressLine}` : ''}`.trim() : '',
     ]);
-  return toCsv(['社員番号', '氏名', '所属部署', '役職', '雇用区分', '入社日', '退職日', '在籍ステータス', '備考'], rows);
+  return toCsv(['社員番号', '氏名', '所属部署', '役職', '雇用区分', '入社日', '退職日', '在籍ステータス', '備考', '電話番号', 'メールアドレス', '郵便番号', '住所'], rows);
 }
 
 export function tasksToCsv(data: Pick<DataSnapshot, 'tasks' | 'employees' | 'departments'>): string {

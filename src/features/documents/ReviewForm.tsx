@@ -11,6 +11,7 @@ import { useAppData } from '../../app/AppData';
 import { useDraft, clearDraft } from '../../app/hooks';
 import { checkFields, parseAmountInput, parseDateInput, type FieldIssue } from '../../domain/documents/extract';
 import { findDuplicates } from '../../domain/documents/duplicates';
+import { suggestDocumentLinks } from '../../domain/documents/links';
 import {
   DOCUMENT_TYPES,
   DOCUMENT_TYPE_LABEL,
@@ -144,6 +145,7 @@ export function ReviewForm({ doc, readOnly }: { doc: DocumentRecord; readOnly: b
             onChange={(e) => setField(f.key, e.target.value)}
             onBlur={() => normalize(f)}
             type={f.format === 'date' ? 'date' : 'text'}
+            list={f.key === 'issuer' || f.key === 'recipient' ? `dl-doc-${f.key}` : undefined}
             inputMode={f.format === 'amount' ? 'numeric' : undefined}
             autoComplete="off"
             placeholder={f.format === 'amount' ? '例：12345' : f.format === 'registration' ? 'T＋13桁' : ''}
@@ -190,8 +192,25 @@ export function ReviewForm({ doc, readOnly }: { doc: DocumentRecord; readOnly: b
   const numOrNull = (v: string) => (v.trim() === '' ? null : Number.isFinite(Number(v.replace(/,/g, ''))) ? Number(v.replace(/,/g, '')) : null);
   const lineIssues: FieldIssue[] = issues.filter((i) => i.key === 'lines');
 
+  const links = useMemo(() => suggestDocumentLinks({ type: form.type, fields: form.fields, lines: form.lines }, data), [form.type, form.fields, form.lines, data]);
+  // 既存データからの補完候補 (仕入先マスタ・過去の書類)
+  const partyOptions = useMemo(
+    () => ({
+      issuer: [...new Set([...data.suppliers.map((x) => x.name), ...data.documents.map((d) => d.fields.issuer ?? '')].filter(Boolean))].slice(0, 100),
+      recipient: [...new Set(data.documents.map((d) => d.fields.recipient ?? '').filter(Boolean))].slice(0, 100),
+    }),
+    [data.suppliers, data.documents],
+  );
+
   return (
     <div className="space-y-4" data-testid="review-form">
+      {(['issuer', 'recipient'] as const).map((k) => (
+        <datalist key={k} id={`dl-doc-${k}`}>
+          {partyOptions[k].map((o) => (
+            <option key={o} value={o} />
+          ))}
+        </datalist>
+      ))}
       {draft.restored && (
         <p className="flex flex-wrap items-center gap-2 rounded-lg bg-navy-50 px-3 py-2 text-sm dark:bg-navy-900" role="status">
           前回の入力途中の内容を復元しました。
@@ -275,6 +294,26 @@ export function ReviewForm({ doc, readOnly }: { doc: DocumentRecord; readOnly: b
 
       <section aria-label="関連業務" className="space-y-2">
         <h3 className="text-sm font-bold">関連業務</h3>
+        {!readOnly && (links.employees.length > 0 || links.purchaseOrders.length > 0 || links.supplier) && (
+          <div className="rounded-xl border border-navy-200 bg-navy-50/50 p-3 text-sm dark:border-navy-700 dark:bg-navy-900" data-testid="link-candidates">
+            <p className="mb-1 text-xs font-semibold text-navy-700 dark:text-navy-200">読み取った内容から見つかった紐付け候補（選ぶと下の欄に入ります）</p>
+            {links.supplier && <p className="text-xs text-slate-600 dark:text-slate-300">仕入先マスタ：{links.supplier.supplier.name}（{links.supplier.reason}）</p>}
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {links.employees.map((c) => (
+                <button key={c.employee.id} type="button" disabled={form.employeeId === c.employee.id} onClick={() => setForm((s) => ({ ...s, employeeId: c.employee.id }))} className="min-h-10 rounded-full border border-navy-300 bg-white px-3 text-xs font-semibold disabled:opacity-50 dark:border-navy-600 dark:bg-navy-950" title={c.reason}>
+                  社員：{c.employee.name}
+                  {form.employeeId === c.employee.id ? '（設定済み）' : ''}
+                </button>
+              ))}
+              {links.purchaseOrders.map((c) => (
+                <button key={c.order.id} type="button" disabled={form.purchaseOrderId === c.order.id || !!doc.inventory} onClick={() => setForm((s) => ({ ...s, purchaseOrderId: c.order.id }))} className="min-h-10 rounded-full border border-navy-300 bg-white px-3 text-xs font-semibold disabled:opacity-50 dark:border-navy-600 dark:bg-navy-950" data-testid="link-po">
+                  発注書：{c.order.number}（{c.reason}）
+                  {form.purchaseOrderId === c.order.id ? '（設定済み）' : ''}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <SelectField label="関連社員" value={form.employeeId} disabled={readOnly} onChange={(e) => setForm((s) => ({ ...s, employeeId: e.target.value }))} placeholder="（なし）" options={data.employees.map((e) => ({ value: e.id, label: `${e.name}（${e.employeeNumber}）` }))} />
         <SelectField label="関連する問い合わせ" value={form.inquiryId} disabled={readOnly} onChange={(e) => setForm((s) => ({ ...s, inquiryId: e.target.value }))} placeholder="（なし）" options={data.inquiries.map((i) => ({ value: i.id, label: `${i.number} ${i.title}` }))} />
         <SelectField

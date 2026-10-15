@@ -1,10 +1,12 @@
 import { isValidISODate } from './date';
+import { isEmail } from './input/normalize';
 import {
   EMPLOYEE_STATUSES,
   EMPLOYMENT_TYPES,
   PRIORITIES,
   TASK_STATUSES,
   type Employee,
+  type EmployeeContact,
   type EmployeeStatus,
   type EmploymentType,
   type OnboardingRule,
@@ -34,7 +36,7 @@ export function normalizeEmployeeNumber(value: string): string {
 
 export type EmployeeInput = Pick<
   Employee,
-  'employeeNumber' | 'name' | 'departmentId' | 'position' | 'employmentType' | 'hireDate' | 'retireDate' | 'status' | 'notes'
+  'employeeNumber' | 'name' | 'departmentId' | 'position' | 'employmentType' | 'hireDate' | 'retireDate' | 'status' | 'notes' | 'contact'
 >;
 
 export function validateEmployee(
@@ -64,7 +66,20 @@ export function validateEmployee(
   if (!EMPLOYEE_STATUSES.includes(input.status)) e.status = '在籍ステータスを選択してください';
   else if (input.status === 'retired' && !input.retireDate) e.retireDate = '退職ステータスの場合は退職日を入力してください';
   if (input.notes.length > 1000) e.notes = '備考は1000文字以内で入力してください';
+  const c = input.contact;
+  if (c) {
+    if (c.email.trim() && !isEmail(c.email)) e.contact = 'メールアドレスの形式を確認してください（例：taro@example.co.jp）';
+    else if (c.postalCode.trim() && !/^\d{3}-?\d{4}$/.test(c.postalCode.trim())) e.contact = '郵便番号は7桁で入力してください';
+    else if (Object.values(c).some((v) => v.length > 200)) e.contact = '連絡先の各項目は200文字以内で入力してください';
+  }
   return result(e);
+}
+
+/** 連絡先が空なら undefined にする (既存データと同じ形を保つ) */
+export function cleanContact(c: EmployeeContact | undefined): EmployeeContact | undefined {
+  if (!c) return undefined;
+  const t = Object.fromEntries(Object.entries(c).map(([k, v]) => [k, String(v ?? '').trim()])) as unknown as EmployeeContact;
+  return Object.values(t).some(Boolean) ? t : undefined;
 }
 
 export type TaskInput = Pick<

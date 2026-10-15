@@ -18,7 +18,7 @@ import { computeAllStock, computeStockStatus, validateItem, validateQuantity, ty
 import { planSuggestionSync } from '../domain/inventory/suggestions';
 import { ASSET_STATUS_LABEL, PO_STATUS_LABEL, type Asset, type AssetEvent, type AssetStatus, type EquipmentRule, type Item, type PurchaseOrder, type Reservation, type StockMovement, type Supplier } from '../domain/inventory/types';
 import type { DataSnapshot, Task } from '../domain/types';
-import { INVENTORY_AUTOMATIONS } from '../automation/inventoryAutomations';
+import { ALL_AUTOMATIONS } from '../automation/registry';
 import { type AutomationAction } from '../automation/engine';
 import { createInventoryDemo } from '../demo/inventoryDemo';
 import { createDefaultEquipmentRules, createDefaultItems } from '../domain/inventory/defaults';
@@ -916,12 +916,13 @@ export class InventoryService {
    * - 同じキーで実行済み・見送り済みなら中止 (重複実行防止)
    * - 選択された操作をすべて1トランザクションで実行。途中で失敗したら全体を取り消し、失敗を処理履歴に残す
    */
-  async applyProposal(automationId: string, key: string, actionIds: string[]): Promise<{ results: string[] }> {
-    const def = INVENTORY_AUTOMATIONS.find((d) => d.id === automationId);
+  async applyProposal(automationId: string, key: string, actionIds: string[], opts: { auto?: boolean } = {}): Promise<{ results: string[] }> {
+    const def = ALL_AUTOMATIONS.find((d) => d.id === automationId);
     if (!def) throw new AppError('不明な自動化です');
+    if (opts.auto && !def.autoCapable) throw new AppError('この自動化は確認が必要なため、自動では実行できません');
     try {
       return await this.run(ALL, async (tx) => {
-        const done = (await tx.objectStore('automationRuns').index('byKey').getAll(key)).find((r) => r.automationId === automationId && (r.status === 'applied' || r.status === 'dismissed'));
+        const done = (await tx.objectStore('automationRuns').index('byKey').getAll(key)).find((r) => r.automationId === automationId && (r.status === 'applied' || r.status === 'dismissed' || r.status === 'auto'));
         if (done) throw new AppError('この提案は処理済みです（重複実行を防止しました）');
         const data = await this.snapshot(tx);
         const stock = computeAllStock(data.items, data);
@@ -930,12 +931,14 @@ export class InventoryService {
         const selected = proposal.actions.filter((a) => actionIds.includes(a.id));
         if (!selected.length) throw new AppError('実行する操作を選択してください');
         if (selected.length !== new Set(actionIds).size) throw new AppError('在庫や社員の状況が変わったため、この提案は実行できません。最新の提案を確認してください');
+        // 自動実行は、承認が不要な操作 (タスク作成など) だけで構成された提案に限る
+        if (opts.auto && selected.some((a) => a.requiresApproval)) throw new AppError('承認が必要な操作を含むため、自動では実行できません');
         const results: string[] = [];
         for (const a of selected) results.push(await this.execute(tx, a, proposal.inquiryId ?? null));
         await this.syncSuggestions(tx);
         if (proposal.inquiryId) await appendInquiryEvent(tx, proposal.inquiryId, inquiryEvent('task', `自動化「${def.name}」を承認：${results.join('／')}`));
-        await tx.objectStore('automationRuns').add({ id: generateId('run'), automationId, key, status: 'applied', title: proposal.title, results, error: null, at: nowISO() });
-        await logActivity(tx, 'automation', 'apply', `自動化「${def.name}」を実行しました：${proposal.title}（${results.length}件）`);
+        await tx.objectStore('automationRuns').add({ id: generateId('run'), automationId, key, status: opts.auto ? 'auto' : 'applied', title: proposal.title, results, error: null, at: nowISO() });
+        await logActivity(tx, 'automation', opts.auto ? 'auto' : 'apply', `自動化「${def.name}」を${opts.auto ? '自動で' : ''}実行しました：${proposal.title}（${results.length}件）`);
         return { results };
       });
     } catch (e) {
@@ -1011,6 +1014,28 @@ export class InventoryService {
         if (!asset) throw new AppError('資産が見つかりません');
         await this.changeAsset(tx, asset, { status: a.status }, 'status', a.note, a.inquiryId ?? inquiryId);
         return `${asset.assetNumber} を「${ASSET_STATUS_LABEL[a.status]}」に変更`;
+      }
+      case 'create_onboarding_task': {
+        const exists = (await tx.objectStore('tasks').index('byEmployee').getAll(a.employeeId)).some((t) => t.ruleId === a.ruleId);
+        if (exists) return `タスク「${a.title}」は作成済みのためスキップ`;
+        await tx.objectStore('tasks').add({
+          id: generateId('task'),
+          employeeId: a.employeeId,
+          title: a.title,
+          description: a.description,
+          assigneeDepartmentId: a.departmentId,
+          assignee: a.assignee,
+          priority: a.priority,
+          dueDate: a.dueDate,
+          status: 'todo',
+          source: 'onboarding',
+          ruleId: a.ruleId,
+          inquiryId: null,
+          createdAt: now,
+          updatedAt: now,
+          completedAt: null,
+        });
+        return `タスク「${a.title}」を作成`;
       }
       case 'create_task': {
         const exists = (await tx.objectStore('tasks').getAll()).some((t) => t.ruleId === a.ruleKey);

@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { currentProvider, type StatusSummary } from '../ai/assist';
 import {
   Activity,
   AlertTriangle,
@@ -12,6 +13,7 @@ import {
   ClipboardList,
   Flame,
   Headset,
+  ListChecks,
   ListTodo,
   PieChart,
   Sparkles,
@@ -126,6 +128,7 @@ export function DashboardPage() {
     <>
       <PageHeader title="ダッシュボード" description={`${DEMO_COMPANY_NAME}（架空）の業務状況をリアルタイムに集計しています`} />
       <DemoGuide />
+      <StatusSummaryCard />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
         <StatCard label="登録社員数" value={s.employeeCount} unit="名" icon={Users} tone="navy" href="#/employees" sub={`在籍 ${s.activeCount}名（退職者除く）`} />
@@ -446,6 +449,40 @@ function DocumentsSummary() {
           </a>
         ))}
       </div>
+    </Card>
+  );
+}
+
+/** 今日の要点 (ルールベースの自動集計。AI ではないことを表示する) */
+function StatusSummaryCard() {
+  const { stats, helpdeskStats, inventoryStats, proposals, data } = useAppData();
+  const [summary, setSummary] = useState<StatusSummary | null>(null);
+  const toReview = data.documents.filter((d) => !d.deletedAt && d.status === 'needs_review').length;
+  useEffect(() => {
+    let alive = true;
+    currentProvider()
+      .summarizeStatus({ stats, helpdesk: helpdeskStats, inventory: inventoryStats, proposals: proposals.length, documentsToReview: toReview })
+      .then((s) => alive && setSummary(s));
+    return () => {
+      alive = false;
+    };
+  }, [stats, helpdeskStats, inventoryStats, proposals.length, toReview]);
+  if (!summary) return null;
+  return (
+    <Card className="mb-3" data-testid="status-summary">
+      <CardHeader title="今日の要点" icon={ListChecks} description={`自動集計：${summary.generatedBy.label}`} />
+      <ul className="space-y-1 px-3 pb-3 sm:px-4">
+        {summary.points.slice(0, 6).map((p) => {
+          const body = (
+            <span className="flex min-h-10 items-center gap-2 text-sm">
+              <span className={cx('size-2 shrink-0 rounded-full', p.tone === 'alert' ? 'bg-red-500' : p.tone === 'ok' ? 'bg-emerald-500' : 'bg-navy-400')} aria-hidden />
+              <span className="min-w-0 flex-1">{p.text}</span>
+              {p.href && <ChevronRight className="size-4 text-slate-300" aria-hidden />}
+            </span>
+          );
+          return <li key={p.text}>{p.href ? <a href={p.href} className="block rounded-lg px-1 hover:bg-slate-50 dark:hover:bg-navy-800">{body}</a> : <div className="px-1">{body}</div>}</li>;
+        })}
+      </ul>
     </Card>
   );
 }

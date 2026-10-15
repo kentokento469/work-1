@@ -5,7 +5,8 @@
  * - 入力中に関連FAQを表示し、FAQで解決できる問い合わせに早く気づけるようにする
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { ArrowLeft, BookOpenCheck, RotateCcw, Send } from 'lucide-react';
+import { BackLink } from '../../app/BackLink';
+import { BookOpenCheck, RotateCcw, Send } from 'lucide-react';
 import { useAppData } from '../../app/AppData';
 import { clearDraft, useDraft } from '../../app/hooks';
 import { navigate } from '../../app/router';
@@ -73,10 +74,7 @@ export function InquiryNewPage({ query }: { query: URLSearchParams }) {
 
   return (
     <>
-      <a href="#/helpdesk" className="-ml-2 mb-3 inline-flex min-h-10 items-center gap-1 rounded-lg px-2 text-sm text-slate-500 hover:text-slate-800 dark:hover:text-slate-200">
-        <ArrowLeft className="size-4" aria-hidden />
-        問い合わせ一覧
-      </a>
+      <BackLink href="#/helpdesk">問い合わせ一覧</BackLink>
       <PageHeader title="問い合わせの登録" description="内容を入力すると、カテゴリ・優先度・担当者・期限を自動で提案します" />
 
       {draft.restored && (

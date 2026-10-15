@@ -7,6 +7,7 @@
  *  v2 (Phase 2): inquiries, faqs, inquiryCategories を追加。既存タスクに inquiryId: null を付与
  *  v3 (Phase 3): 在庫・IT資産・購買・自動化履歴のストアを追加。保管場所・仕入先 (架空) の初期マスタを投入
  *  v4 (Phase 4): documents (書類・抽出結果), documentFiles (元ファイル本体) を追加
+ *  v5 (Phase 5): settings (自動化ルールの設定など、アプリの設定値) を追加
  */
 import { openDB, type DBSchema, type IDBPDatabase, type IDBPTransaction, type StoreNames } from 'idb';
 import { createDefaultInquiryCategories } from '../domain/helpdesk/defaults';
@@ -27,9 +28,10 @@ import type {
 } from '../domain/inventory/types';
 import { createDefaultLocations, createDefaultSuppliers } from '../domain/inventory/defaults';
 import type { DocumentFile, DocumentRecord } from '../domain/documents/types';
+import type { SettingRecord } from '../domain/types';
 
 export const DB_NAME = 'workcore';
-export const DB_VERSION = 4;
+export const DB_VERSION = 5;
 
 export interface WorkCoreSchema extends DBSchema {
   departments: { key: string; value: Department };
@@ -55,6 +57,7 @@ export interface WorkCoreSchema extends DBSchema {
   automationRuns: { key: string; value: AutomationRun; indexes: { byKey: string } };
   documents: { key: string; value: DocumentRecord; indexes: { byNumber: string } };
   documentFiles: { key: string; value: DocumentFile; indexes: { byDocument: string; byHash: string } };
+  settings: { key: string; value: SettingRecord };
 }
 
 export type WorkCoreDB = IDBPDatabase<WorkCoreSchema>;
@@ -82,6 +85,7 @@ export const STORE_NAMES = [
   'automationRuns',
   'documents',
   'documentFiles',
+  'settings',
 ] as const;
 
 /**
@@ -151,6 +155,12 @@ async function migrateToV4(db: IDBPDatabase<WorkCoreSchema>, tx: UpgradeTx) {
   await tx.objectStore('meta').put({ key: 'schemaMigratedToV4', value: new Date().toISOString() });
 }
 
+/** v4 → v5: 設定値のストアを追加 (既存データには触れない。設定がなければ既定値で動く) */
+async function migrateToV5(db: IDBPDatabase<WorkCoreSchema>, tx: UpgradeTx) {
+  db.createObjectStore('settings', { keyPath: 'id' });
+  await tx.objectStore('meta').put({ key: 'schemaMigratedToV5', value: new Date().toISOString() });
+}
+
 export function openWorkCoreDB(name = DB_NAME, version = DB_VERSION): Promise<WorkCoreDB> {
   return openDB<WorkCoreSchema>(name, version, {
     async upgrade(db, oldVersion, _newVersion, tx) {
@@ -171,6 +181,7 @@ export function openWorkCoreDB(name = DB_NAME, version = DB_VERSION): Promise<Wo
       if (oldVersion < 2 && version >= 2) await migrateToV2(db, tx);
       if (oldVersion < 3 && version >= 3) await migrateToV3(db, tx);
       if (oldVersion < 4 && version >= 4) await migrateToV4(db, tx);
+      if (oldVersion < 5 && version >= 5) await migrateToV5(db, tx);
     },
     blocked() {
       console.warn('WorkCore: 他のタブでデータベースが使用中です');

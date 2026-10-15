@@ -12,6 +12,11 @@
  * 承認モード
  * - 'required': 在庫の引当・資産の状態変更などを含むため、担当者が内容を確認して承認するまで実行しない
  * - 'auto'    : 実行しても業務上の確定を伴わない (発注候補=下書きの作成など)。サービス層が自動実行し履歴を残す
+ *
+ * 利用者による設定 (Phase 5, automation/settings.ts)
+ * - 各自動化を有効/無効にできる
+ * - autoCapable (操作がタスク作成など取り消しやすいものだけ) の自動化は「確認してから実行 / 自動で実行」を選べる
+ * - 外部への影響がある操作 (発注・請求・申請・送信・アカウント削除) を含む自動化は、常に確認が必要 (autoCapable にしない)
  */
 import type { DataSnapshot, ISODate, Priority } from '../domain/types';
 import type { AssetStatus } from '../domain/inventory/types';
@@ -37,6 +42,18 @@ export type ActionPayload =
       employeeId: string | null;
       inquiryId: string | null;
       assetId: string | null;
+    }
+  | {
+      /** 入社準備ルール (Phase 1) に基づくタスク。source: 'onboarding'・ruleId で入社準備画面の重複判定と共通 */
+      kind: 'create_onboarding_task';
+      employeeId: string;
+      ruleId: string;
+      title: string;
+      description: string;
+      departmentId: string;
+      assignee: string;
+      priority: Priority;
+      dueDate: ISODate;
     };
 
 export type AutomationAction = ActionPayload & {
@@ -73,12 +90,19 @@ export interface AutomationDefinition {
   trigger: string;
   approval: 'required' | 'auto';
   detect: (ctx: AutomationContext) => AutomationProposal[];
+  /** 分類 (画面表示用) */
+  category?: string;
+  /** 操作がタスク作成など取り消しやすいものだけで、利用者の設定で自動実行にできる */
+  autoCapable?: boolean;
 }
 
-/** 処理済み (実行・見送り) のキーを除いた提案一覧 */
-export function pendingProposals(defs: AutomationDefinition[], ctx: AutomationContext): AutomationProposal[] {
-  const done = new Set(ctx.data.automationRuns.filter((r) => r.status === 'applied' || r.status === 'dismissed').map((r) => `${r.automationId}|${r.key}`));
-  return defs.flatMap((d) => d.detect(ctx)).filter((p) => p.actions.length > 0 && !done.has(`${p.automationId}|${p.key}`));
+/** 処理済み (実行・見送り・自動実行) のキーを除いた提案一覧。isEnabled で無効にした自動化は判定しない */
+export function pendingProposals(defs: AutomationDefinition[], ctx: AutomationContext, isEnabled: (id: string) => boolean = () => true): AutomationProposal[] {
+  const done = new Set(ctx.data.automationRuns.filter((r) => r.status === 'applied' || r.status === 'dismissed' || r.status === 'auto').map((r) => `${r.automationId}|${r.key}`));
+  return defs
+    .filter((d) => isEnabled(d.id))
+    .flatMap((d) => d.detect(ctx))
+    .filter((p) => p.actions.length > 0 && !done.has(`${p.automationId}|${p.key}`));
 }
 
 /** 提案の実行内容の指紋 (どの資産・数量を使うかが変わったら別の提案として扱う) */

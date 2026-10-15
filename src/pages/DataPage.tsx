@@ -50,6 +50,7 @@ const COUNT_LABEL: Record<keyof DataSnapshot, string> = {
   equipmentRules: '必要機器ルール',
   automationRuns: '自動化の処理履歴',
   documents: '書類',
+  settings: '設定',
 };
 
 export function DataPage() {

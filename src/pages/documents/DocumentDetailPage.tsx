@@ -3,7 +3,8 @@
  * スマホでは「原本」「項目」を切り替え、PCでは左右に並べる。
  */
 import { useEffect, useState } from 'react';
-import { Archive, ArrowLeft, Download, FileQuestion, FileText, History, Pencil, RotateCcw, ScanText, Trash2, Undo2 } from 'lucide-react';
+import { BackLink } from '../../app/BackLink';
+import { Archive, Download, FileQuestion, FileText, History, Pencil, RotateCcw, ScanText, Trash2, Undo2 } from 'lucide-react';
 import { useAppData } from '../../app/AppData';
 import { navigate } from '../../app/router';
 import { formatDateTimeJa } from '../../domain/date';
@@ -97,10 +98,7 @@ function Detail({ doc, autoProcess, keepType, run }: { doc: DocumentRecord; auto
 
   return (
     <>
-      <a href="#/documents" className="mb-2 inline-flex min-h-10 items-center gap-1 text-sm text-slate-500">
-        <ArrowLeft className="size-4" aria-hidden />
-        書類一覧
-      </a>
+      <BackLink href="#/documents">書類一覧</BackLink>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <h1 className="font-mono text-lg font-bold" data-testid="doc-number">
           {doc.number}

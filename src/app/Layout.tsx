@@ -23,6 +23,7 @@ import { useTheme } from './theme';
 import { cx } from '../ui/primitives';
 import { DEMO_COMPANY_NAME } from '../demo/demoData';
 import { formatDateJa } from '../domain/date';
+import { useEdgeSwipeBack } from './swipeBack';
 
 interface NavItem {
   key: string;
@@ -103,6 +104,7 @@ export function DemoNotice({ compact }: { compact?: boolean }) {
 
 export function Layout({ active, children }: { active: string; children: ReactNode }) {
   const { stats, helpdeskStats, inventoryStats, proposals, today, data } = useAppData();
+  useEdgeSwipeBack();
   const docsToReview = data.documents.filter((d) => !d.deletedAt && d.status === 'needs_review').length;
   const badge = (key: string) =>
     key === 'tasks'
@@ -179,7 +181,7 @@ export function Layout({ active, children }: { active: string; children: ReactNo
       </header>
 
       <main className="lg:pl-60">
-        <div className="mx-auto max-w-6xl px-4 pb-28 pt-5 sm:px-6 lg:px-8 lg:pb-12 lg:pt-8">
+        <div className="mx-auto max-w-6xl px-4 pb-28 pt-5 sm:px-6 lg:px-8 lg:pb-12 lg:pt-8" data-swipe-surface>
           <p className="mb-1 hidden text-xs text-slate-400 lg:block">{formatDateJa(today)}</p>
           {children}
         </div>
