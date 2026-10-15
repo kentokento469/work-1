@@ -170,13 +170,13 @@ UI層 (React + Tailwind)        pages/ features/ ui/   … 表示と入力のみ
 | --- | --- |
 | TypeScript 型チェック | ✅ エラー 0 |
 | 本番ビルド | ✅ 初回 JS gzip 149KB＋画面ごとの分割チャンク（PDF.js・OCR・電話番号ライブラリは必要時のみ読み込み） |
-| 単体・結合テスト（Vitest） | ✅ 146 / 146（Phase 1: 26、Phase 2: 65、Phase 3: 25、Phase 4: 27、ダッシュボード改善: 3） |
-| E2E（Playwright, iPhone 13 相当 + デスクトップ） | ✅ 32 / 32（Phase 4 の検証項目1〜10を含む。実際に日本語OCRを実行。全体を2回反復して 64 / 64） |
-| 実ブラウザでの DB マイグレーション（Phase 1→2、2→3、3→4） | ✅ 各 2 / 2（手順は e2e/migration.spec.ts 冒頭） |
+| 単体・結合テスト（Vitest） | ✅ 174 / 174（Phase 1〜4・ダッシュボード改善: 146、Phase 5: 28） |
+| E2E（Playwright, iPhone 13 相当 + デスクトップ） | ✅ 42 / 42（Phase 5 の検証項目1〜15を含む。全体を2回反復して 84 / 84） |
+| 実ブラウザでの DB マイグレーション（Phase 1→2、2→3、3→4、4→5） | ✅ 合格（手順は e2e/migration.spec.ts 冒頭） |
 | 依存パッケージ脆弱性（npm audit） | ✅ 0件 |
-| **実機 iPhone Safari** | ⚠️ **未検証**（Chromium による iPhone 13 エミュレーションのみ。カメラ・HEIC・共有シート・実機での OCR 速度も未検証） |
+| **実機 iPhone Safari** | ⚠️ **未検証**（Chromium による iPhone 13 エミュレーションのみ。標準のスワイプ戻り・単独起動・日本語キーボード・カメラ・HEIC・共有シート・実機での OCR 速度も未検証） |
 
-詳細は [docs/PHASE4_RESULTS.md](docs/PHASE4_RESULTS.md)（Phase 4）、手作業との比較（実測値と仮定値を区別）は [docs/PHASE3_RESULTS.md](docs/PHASE3_RESULTS.md)（Phase 3）、[docs/TEST_RESULTS.md](docs/TEST_RESULTS.md)（Phase 2）。
+詳細は [docs/PHASE5_RESULTS.md](docs/PHASE5_RESULTS.md)（Phase 5）、[docs/PHASE4_RESULTS.md](docs/PHASE4_RESULTS.md)（Phase 4）、手作業との比較（実測値と仮定値を区別）は [docs/PHASE3_RESULTS.md](docs/PHASE3_RESULTS.md)（Phase 3）、[docs/TEST_RESULTS.md](docs/TEST_RESULTS.md)（Phase 2）。
 
 ---
 

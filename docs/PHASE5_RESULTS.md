@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | TypeScript 型チェック（strict） | `npm run typecheck` | エラー 0 |
 | 単体・結合テスト | `npm test` | **174 / 174 合格**（Phase 1〜4 既存 146件、Phase 5 追加 28件：電話・郵便番号・数値・メール 19、書類の関連候補 3、横断自動化 6） |
-| E2E | `npm run test:e2e` | __E2E_RESULT__ |
+| E2E | `npm run test:e2e` | **42 / 42 合格**（22シナリオを iPhone・デスクトップで実行。うち Phase 5 は 6シナリオで、スワイプの2シナリオは iPhone のみ）。全体を2回反復（`--repeat-each=2`）して **84 / 84**、失敗 0 |
 | DBマイグレーション E2E（Phase 4 版 → Phase 5 版） | `e2e/migration.spec.ts`（手順は同ファイル冒頭） | **合格**（iPhone。Phase 4 版で書類を登録 → Phase 5 版で開く → 社員・問い合わせ・品目・入出庫履歴・書類の件数が一致、設定ストアが追加。通常実行では skip） |
 | 本番ビルド | `npm run build` | 成功。初回 JS gzip 149KB（Phase 4 は 138KB。自動化ルール・履歴管理・入力部品の追加分）。 電話番号ライブラリ（libphonenumber-js、gzip 30KB）は入力欄を使うときだけ読み込む。郵便番号データは先頭3桁ごとの JSON（`vendor/postal/`、同じサイト内）を必要な分だけ取得 |
 | 依存パッケージ | `npm audit` | 脆弱性 0件 |
