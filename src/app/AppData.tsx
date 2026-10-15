@@ -6,6 +6,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { openWorkCoreDB } from '../data/db';
 import { computeDashboard, type DashboardStats } from '../domain/analytics';
+import { computeHelpdeskStats, type HelpdeskStats } from '../domain/helpdesk/analytics';
 import type { DataSnapshot, Department, Employee } from '../domain/types';
 import { AppError, WorkCoreService } from '../services/workcoreService';
 import { useToast } from '../ui/Toast';
@@ -14,12 +15,21 @@ interface AppDataValue {
   service: WorkCoreService;
   data: DataSnapshot;
   stats: DashboardStats;
+  helpdeskStats: HelpdeskStats;
   today: string;
   deptById: Map<string, Department>;
   empById: Map<string, Employee>;
-  /** 変更処理を実行し、成功時はデータ再読込とトースト表示。失敗時は AppError を投げ直す */
-  run: <T>(action: (s: WorkCoreService) => Promise<T>, successMessage?: string | ((r: T) => string)) => Promise<T>;
+  /**
+   * 変更処理を実行し、成功時はデータ再読込とトースト表示。失敗時は AppError を投げ直す。
+   * undo を渡すと通知に「元に戻す」ボタンを付ける (確認ダイアログの代わりに取り消し可能にする)
+   */
+  run: <T>(action: (s: WorkCoreService) => Promise<T>, successMessage?: string | ((r: T) => string), opts?: RunOptions<T>) => Promise<T>;
   reload: () => Promise<void>;
+}
+
+export interface RunOptions<T> {
+  undo?: (result: T) => (s: WorkCoreService) => Promise<unknown>;
+  undoMessage?: string;
 }
 
 const Ctx = createContext<AppDataValue | null>(null);
@@ -77,12 +87,29 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   }, [service]);
 
   const run = useCallback(
-    async <T,>(action: (s: WorkCoreService) => Promise<T>, successMessage?: string | ((r: T) => string)) => {
+    async <T,>(action: (s: WorkCoreService) => Promise<T>, successMessage?: string | ((r: T) => string), opts?: RunOptions<T>): Promise<T> => {
       if (!service) throw new AppError('データの読み込み中です');
       try {
         const result = await action(service);
         await reload();
-        if (successMessage) toast.success(typeof successMessage === 'function' ? successMessage(result) : successMessage);
+        if (successMessage) {
+          const msg = typeof successMessage === 'function' ? successMessage(result) : successMessage;
+          const undo = opts?.undo;
+          toast.success(
+            msg,
+            undo
+              ? {
+                  label: '元に戻す',
+                  onClick: () => {
+                    undo(result)(service)
+                      .then(reload)
+                      .then(() => toast.info(opts?.undoMessage ?? '元に戻しました'))
+                      .catch((e) => toast.error(e instanceof AppError ? e.message : '元に戻せませんでした'));
+                  },
+                }
+              : undefined,
+          );
+        }
         return result;
       } catch (e) {
         const message = e instanceof AppError ? e.message : '処理に失敗しました。時間をおいて再度お試しください';
@@ -101,6 +128,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       service: state.service,
       data: state.data,
       stats: computeDashboard(state.data, today),
+      helpdeskStats: computeHelpdeskStats(state.data.inquiries, state.data.inquiryCategories, today),
       today,
       deptById: new Map(state.data.departments.map((d) => [d.id, d])),
       empById: new Map(state.data.employees.map((e) => [e.id, e])),

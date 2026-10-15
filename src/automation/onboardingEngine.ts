@@ -185,6 +185,7 @@ export function materializePlan(
       status: 'todo',
       source: 'onboarding',
       ruleId: item.ruleId,
+      inquiryId: null,
       createdAt: nowISO,
       updatedAt: nowISO,
       completedAt: null,

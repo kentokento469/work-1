@@ -5,7 +5,7 @@ import { addDays } from '../domain/date';
 import { PRIORITIES, PRIORITY_LABEL, TASK_STATUSES, TASK_STATUS_LABEL, type Priority, type Task, type TaskStatus } from '../domain/types';
 import { validateTask, type FieldErrors, type TaskInput } from '../domain/validation';
 import { AppError } from '../services/workcoreService';
-import { ConfirmDialog, Modal } from '../ui/Modal';
+import { Modal, ModalCancelButton } from '../ui/Modal';
 import { AutoBadge } from '../ui/badges';
 import { Button, SelectField, TextAreaField, TextField } from '../ui/primitives';
 
@@ -51,7 +51,6 @@ export function TaskFormModal({
   const [form, setForm] = useState<TaskInput>(initial);
   const [errors, setErrors] = useState<FieldErrors<TaskInput>>({});
   const [saving, setSaving] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -89,25 +88,35 @@ export function TaskFormModal({
     }
   };
 
+  /** 削除は確認ダイアログを出さず即実行し、通知の「元に戻す」で取り消せるようにする */
+  const deleteTask = async () => {
+    if (!task) return;
+    try {
+      await run((s) => s.deleteTask(task.id), `タスク「${task.title}」を削除しました`, { undo: (deleted) => (s) => s.restoreTask(deleted) });
+      onClose();
+    } catch {
+      /* トースト表示済み */
+    }
+  };
+
   const linked = task?.employeeId ? empById.get(task.employeeId) : undefined;
 
   return (
     <>
       <Modal
-        open={open && !confirmDelete}
+        open={open}
         onClose={onClose}
+        dirty={JSON.stringify(form) !== JSON.stringify(initial)}
         title={task ? 'タスクの編集' : 'タスクの新規作成'}
         description={task?.source === 'onboarding' ? `入社準備ルールから自動生成されたタスクです${linked ? `（${linked.name}さん）` : ''}` : undefined}
         footer={
           <>
             {task && (
-              <Button variant="ghost" icon={Trash2} className="text-red-600 sm:mr-auto dark:text-red-400" onClick={() => setConfirmDelete(true)} disabled={saving}>
+              <Button variant="ghost" icon={Trash2} className="text-red-600 sm:mr-auto dark:text-red-400" onClick={deleteTask} disabled={saving}>
                 削除
               </Button>
             )}
-            <Button variant="secondary" onClick={onClose} disabled={saving}>
-              キャンセル
-            </Button>
+            <ModalCancelButton disabled={saving} />
             <Button type="submit" form="task-form" icon={Save} loading={saving}>
               {task ? '更新する' : '作成する'}
             </Button>
@@ -168,19 +177,6 @@ export function TaskFormModal({
           <TextAreaField label="詳細・メモ" value={form.description} onChange={(e) => set('description', e.target.value)} error={errors.description} wrapClassName="sm:col-span-2" maxLength={1000} />
         </form>
       </Modal>
-      <ConfirmDialog
-        open={confirmDelete}
-        danger
-        title="タスクを削除しますか？"
-        confirmLabel="削除する"
-        message={<>「{task?.title}」を削除します。この操作は取り消せません。</>}
-        onConfirm={async () => {
-          if (!task) return;
-          await run((s) => s.deleteTask(task.id), 'タスクを削除しました');
-          onClose();
-        }}
-        onClose={() => setConfirmDelete(false)}
-      />
     </>
   );
 }

@@ -1,4 +1,4 @@
-import { Building2, User } from 'lucide-react';
+import { Building2, Headset, User } from 'lucide-react';
 import { useAppData } from '../app/AppData';
 import { isTaskOverdue } from '../domain/analytics';
 import { TASK_STATUSES, TASK_STATUS_LABEL, type Task, type TaskStatus } from '../domain/types';
@@ -22,9 +22,11 @@ export function StatusSelect({ task }: { task: Task }) {
       onClick={(e) => e.stopPropagation()}
       onChange={(e) => {
         const next = e.target.value as TaskStatus;
-        run((s) => s.setTaskStatus(task.id, next), `「${task.title}」を${TASK_STATUS_LABEL[next]}にしました`).catch(() => undefined);
+        run((s) => s.setTaskStatus(task.id, next), `「${task.title}」を${TASK_STATUS_LABEL[next]}にしました`, {
+          undo: (r) => (s) => s.setTaskStatus(task.id, r.previousStatus),
+        }).catch(() => undefined);
       }}
-      className={cx('h-9 shrink-0 rounded-full border pl-3 pr-7 text-[13px] font-semibold focus:outline-none focus:ring-2 focus:ring-navy-500/30', STATUS_STYLE[task.status])}
+      className={cx('h-11 shrink-0 rounded-full border pl-3 pr-7 text-[13px] font-semibold sm:h-9 focus:outline-none focus:ring-2 focus:ring-navy-500/30', STATUS_STYLE[task.status])}
     >
       {TASK_STATUSES.map((s) => (
         <option key={s} value={s}>
@@ -36,8 +38,9 @@ export function StatusSelect({ task }: { task: Task }) {
 }
 
 export function TaskItem({ task, onOpen, showEmployee = true }: { task: Task; onOpen: (t: Task) => void; showEmployee?: boolean }) {
-  const { today, empById, deptById } = useAppData();
+  const { today, empById, deptById, data } = useAppData();
   const emp = task.employeeId ? empById.get(task.employeeId) : undefined;
+  const inquiry = task.inquiryId ? data.inquiries.find((i) => i.id === task.inquiryId) : undefined;
   const overdue = isTaskOverdue(task, today);
   return (
     <li
@@ -47,29 +50,41 @@ export function TaskItem({ task, onOpen, showEmployee = true }: { task: Task; on
     >
       {overdue && <span className="absolute inset-y-0 left-0 w-1 bg-red-500" aria-hidden />}
       <div className="flex items-start gap-3 px-4 py-3 sm:px-5">
-        <button type="button" onClick={() => onOpen(task)} className="min-w-0 flex-1 text-left">
-          <p className={cx('font-semibold leading-snug text-slate-800 dark:text-slate-100', task.status === 'done' && 'text-slate-400 line-through dark:text-slate-500')}>
-            {task.title}
-          </p>
-          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
-            <DueDate task={task} today={today} />
-            <PriorityBadge priority={task.priority} />
-            {task.source === 'onboarding' && <AutoBadge />}
-          </div>
-          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-slate-500 dark:text-slate-400">
-            {showEmployee && emp && (
+        <div className="min-w-0 flex-1">
+          <button type="button" onClick={() => onOpen(task)} className="w-full text-left">
+            <p className={cx('font-semibold leading-snug text-slate-800 dark:text-slate-100', task.status === 'done' && 'text-slate-400 line-through dark:text-slate-500')}>
+              {task.title}
+            </p>
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+              <DueDate task={task} today={today} />
+              <PriorityBadge priority={task.priority} />
+              {task.source === 'onboarding' && <AutoBadge />}
+              {task.source === 'inquiry' && <AutoBadge label="問い合わせ由来" />}
+            </div>
+            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-slate-500 dark:text-slate-400">
+              {showEmployee && emp && (
+                <span className="inline-flex items-center gap-1">
+                  <User className="size-3" aria-hidden />
+                  対象：{emp.name}
+                </span>
+              )}
               <span className="inline-flex items-center gap-1">
-                <User className="size-3" aria-hidden />
-                対象：{emp.name}
+                <Building2 className="size-3" aria-hidden />
+                {deptById.get(task.assigneeDepartmentId)?.name ?? '不明'}
+                {task.assignee && `・${task.assignee}`}
               </span>
-            )}
-            <span className="inline-flex items-center gap-1">
-              <Building2 className="size-3" aria-hidden />
-              {deptById.get(task.assigneeDepartmentId)?.name ?? '不明'}
-              {task.assignee && `・${task.assignee}`}
-            </span>
-          </div>
-        </button>
+            </div>
+          </button>
+          {inquiry && (
+            <a
+              href={`#/helpdesk/${inquiry.id}`}
+              className="mt-0.5 inline-flex min-h-8 items-center gap-1 text-xs font-semibold text-navy-600 underline-offset-2 hover:underline dark:text-navy-300"
+            >
+              <Headset className="size-3" aria-hidden />
+              問い合わせ {inquiry.number}
+            </a>
+          )}
+        </div>
         <StatusSelect task={task} />
       </div>
     </li>

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { ChevronRight, Plus, Search, UserPlus, Users, X } from 'lucide-react';
 import { useAppData } from '../app/AppData';
 import { navigate } from '../app/router';
+import { useQueryState } from '../app/hooks';
 import { formatDateJa } from '../domain/date';
 import { EMPLOYEE_STATUSES, EMPLOYEE_STATUS_LABEL, type Employee } from '../domain/types';
 import { EmployeeFormModal } from '../features/EmployeeFormModal';
@@ -9,11 +10,14 @@ import { EmployeeStatusBadge } from '../ui/badges';
 import { ConfirmDialog } from '../ui/Modal';
 import { Button, Card, EmptyState, FilterSelect, PageHeader } from '../ui/primitives';
 
-export function EmployeesPage({ query }: { query: URLSearchParams }) {
+export function EmployeesPage() {
   const { data, deptById, stats } = useAppData();
-  const [keyword, setKeyword] = useState('');
-  const [dept, setDept] = useState(query.get('dept') ?? '');
-  const [status, setStatus] = useState(query.get('status') ?? '');
+  // 検索条件は URL に保存し、詳細画面から戻っても保持する
+  const [f, setF] = useQueryState({ q: '', dept: '', status: '' });
+  const { q: keyword, dept, status } = f;
+  const setKeyword = (q: string) => setF({ q });
+  const setDept = (d: string) => setF({ dept: d });
+  const setStatus = (st: string) => setF({ status: st });
   const [formOpen, setFormOpen] = useState(false);
   const [created, setCreated] = useState<Employee | null>(null);
 
@@ -88,11 +92,7 @@ export function EmployeesPage({ query }: { query: URLSearchParams }) {
             <button
               type="button"
               className="inline-flex min-h-9 items-center gap-1 font-semibold text-navy-600 dark:text-navy-300"
-              onClick={() => {
-                setKeyword('');
-                setDept('');
-                setStatus('');
-              }}
+              onClick={() => setF({ q: '', dept: '', status: '' })}
             >
               <X className="size-3.5" />
               条件をクリア

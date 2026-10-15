@@ -18,7 +18,7 @@ export function isTaskDueSoon(t: Task, todayISO: ISODate, days = 3): boolean {
   return diffDays(todayISO, t.dueDate) <= days;
 }
 
-export type AttentionKind = 'overdue' | 'due_soon' | 'unprepared_hire';
+export type AttentionKind = 'overdue' | 'due_soon' | 'unprepared_hire' | 'inquiry_overdue' | 'inquiry_new_high';
 
 export interface AttentionItem {
   kind: AttentionKind;
@@ -29,6 +29,7 @@ export interface AttentionItem {
   score: number;
   taskId?: string;
   employeeId?: string;
+  inquiryId?: string;
 }
 
 export interface DashboardStats {
@@ -102,6 +103,24 @@ export function computeDashboard(data: DataSnapshot, todayISO: ISODate): Dashboa
         score: 50 + h.daysUntil,
         employeeId: h.employee.id,
       });
+    }
+  }
+  // ヘルプデスク: 期限超過の問い合わせ・高優先度で未着手の問い合わせ
+  for (const i of data.inquiries ?? []) {
+    const open = i.status !== 'resolved' && i.status !== 'closed';
+    if (!open) continue;
+    if (i.dueDate < todayISO) {
+      const days = diffDays(i.dueDate, todayISO);
+      attention.push({
+        kind: 'inquiry_overdue',
+        id: `iq_${i.id}`,
+        title: `${i.number} ${i.title}`,
+        detail: `問い合わせ・${days}日超過・${i.requesterName}`,
+        score: -days * 10 - PRIORITY_WEIGHT[i.priority],
+        inquiryId: i.id,
+      });
+    } else if (i.status === 'new' && i.priority === 'high') {
+      attention.push({ kind: 'inquiry_new_high', id: `in_${i.id}`, title: `${i.number} ${i.title}`, detail: `高優先度の新規問い合わせ・${i.requesterName}`, score: 5, inquiryId: i.id });
     }
   }
   attention.sort((a, b) => a.score - b.score);

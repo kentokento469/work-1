@@ -37,10 +37,10 @@ export function PriorityBadge({ priority }: { priority: Priority }) {
   );
 }
 
-export function AutoBadge() {
+export function AutoBadge({ label = '自動生成' }: { label?: string }) {
   return (
     <Badge tone="violet" icon={Zap}>
-      自動生成
+      {label}
     </Badge>
   );
 }

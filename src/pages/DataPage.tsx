@@ -1,9 +1,10 @@
 import { useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Database, Download, FileJson, FileSpreadsheet, History, RefreshCcw, ShieldCheck, Trash2, Upload } from 'lucide-react';
+import { AlertTriangle, Database, Download, FileJson, FileSpreadsheet, Headset, History, RefreshCcw, ShieldCheck, Trash2, Upload } from 'lucide-react';
 import { useAppData } from '../app/AppData';
 import { downloadText, timestampForFile } from '../app/download';
 import { createBackup, parseBackupText, type BackupFile } from '../data/backup';
-import { employeesToCsv, tasksToCsv } from '../data/csv';
+import { employeesToCsv, inquiriesToCsv, tasksToCsv } from '../data/csv';
+import { DemoNotice } from '../app/Layout';
 import { formatDateTimeJa } from '../domain/date';
 import type { ActivityCategory, DataSnapshot } from '../domain/types';
 import { DEMO_COMPANY_NAME } from '../demo/demoData';
@@ -29,6 +30,9 @@ const COUNT_LABEL: Record<keyof DataSnapshot, string> = {
   tasks: 'タスク',
   rules: '準備ルール',
   activities: '操作履歴',
+  inquiries: '問い合わせ',
+  faqs: 'FAQ',
+  inquiryCategories: '問い合わせカテゴリ',
 };
 
 export function DataPage() {
@@ -42,12 +46,20 @@ export function DataPage() {
   const [category, setCategory] = useState('');
   const [logLimit, setLogLimit] = useState(30);
 
-  const exportFile = async (kind: 'employees' | 'tasks' | 'json') => {
+  const exportFile = async (kind: 'employees' | 'tasks' | 'inquiries' | 'json') => {
     const ts = timestampForFile();
-    if (kind === 'employees') downloadText(`workcore_employees_${ts}.csv`, employeesToCsv(data), 'text/csv;charset=utf-8');
+    if (kind === 'inquiries') downloadText(`workcore_inquiries_${ts}.csv`, inquiriesToCsv(data), 'text/csv;charset=utf-8');
+    else if (kind === 'employees') downloadText(`workcore_employees_${ts}.csv`, employeesToCsv(data), 'text/csv;charset=utf-8');
     else if (kind === 'tasks') downloadText(`workcore_tasks_${ts}.csv`, tasksToCsv(data), 'text/csv;charset=utf-8');
     else downloadText(`workcore_backup_${ts}.json`, JSON.stringify(createBackup(data), null, 2), 'application/json');
-    const label = kind === 'employees' ? `社員一覧CSV（${data.employees.length}件）` : kind === 'tasks' ? `タスク一覧CSV（${data.tasks.length}件）` : 'JSONバックアップ';
+    const label =
+      kind === 'employees'
+        ? `社員一覧CSV（${data.employees.length}件）`
+        : kind === 'tasks'
+          ? `タスク一覧CSV（${data.tasks.length}件）`
+          : kind === 'inquiries'
+            ? `問い合わせ一覧CSV（${data.inquiries.length}件）`
+            : 'JSONバックアップ';
     await run((s) => s.recordExport(`${label}を出力しました`), `${label}を出力しました`).catch(() => undefined);
   };
 
@@ -79,6 +91,11 @@ export function DataPage() {
   return (
     <>
       <PageHeader title="データ管理" description="データはこの端末のブラウザ（IndexedDB）に保存され、外部には送信されません" />
+      <Card className="mb-4 border-amber-200 bg-amber-50/60 p-4 dark:border-amber-900 dark:bg-amber-950/20">
+        <p className="mb-1 text-sm font-bold text-amber-900 dark:text-amber-200">これはデモ環境です（本番システムではありません）</p>
+        <DemoNotice />
+        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">ブラウザのデータ削除・プライベートブラウズ・端末変更でデータは失われます。必要に応じてJSONバックアップを保存してください。</p>
+      </Card>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
@@ -89,6 +106,9 @@ export function DataPage() {
             </Button>
             <Button variant="secondary" icon={FileSpreadsheet} onClick={() => exportFile('tasks')} className="justify-start" data-testid="export-tasks">
               タスク一覧をCSV出力（{data.tasks.length}件）
+            </Button>
+            <Button variant="secondary" icon={FileSpreadsheet} onClick={() => exportFile('inquiries')} className="justify-start" data-testid="export-inquiries">
+              問い合わせ一覧をCSV出力（{data.inquiries.length}件）
             </Button>
             <Button variant="secondary" icon={FileJson} onClick={() => exportFile('json')} className="justify-start" data-testid="export-json">
               全データをJSONバックアップ
@@ -135,11 +155,22 @@ export function DataPage() {
         <Card>
           <CardHeader title="デモ環境" icon={Database} description={`架空企業「${DEMO_COMPANY_NAME}」のサンプルデータ`} />
           <div className="grid gap-2 p-4 sm:p-5">
+            {data.inquiries.length === 0 && (
+              <Button
+                variant="secondary"
+                icon={Headset}
+                className="justify-start"
+                data-testid="add-helpdesk-demo"
+                onClick={() => run((s) => s.addHelpdeskDemo(), (n) => `ヘルプデスクのデモデータ（問い合わせ${n}件）を追加しました`).catch(() => undefined)}
+              >
+                ヘルプデスクのデモデータだけ追加（既存データは残す）
+              </Button>
+            )}
             <Button variant="secondary" icon={RefreshCcw} onClick={() => setConfirmReset(true)} className="justify-start" data-testid="reset-demo">
               デモデータを初期化・再生成
             </Button>
             <Button variant="secondary" icon={Trash2} onClick={() => setConfirmClear(true)} className="justify-start text-red-600 dark:text-red-400">
-              社員・タスクを全削除（空の状態で開始）
+              社員・タスク・問い合わせを全削除（空の状態で開始）
             </Button>
             <p className="text-xs text-slate-500 dark:text-slate-400">デモデータの日付は「今日」を基準に生成されるため、いつでも入社予定・期限超過などの状態を確認できます。</p>
           </div>
@@ -227,7 +258,7 @@ export function DataPage() {
         danger
         title="デモデータを初期化しますか？"
         confirmLabel="初期化する"
-        message="現在のデータ（社員・タスク・ルール・部署・操作履歴）をすべて削除し、デモデータを再生成します。"
+        message="現在のデータ（社員・タスク・問い合わせ・FAQ・ルール・部署・操作履歴）をすべて削除し、デモデータを再生成します。"
         onConfirm={() => run((s) => s.resetDemoData(), 'デモデータを初期化しました')}
         onClose={() => setConfirmReset(false)}
       />
@@ -236,7 +267,7 @@ export function DataPage() {
         danger
         title="社員・タスクを全削除しますか？"
         confirmLabel="全削除する"
-        message="社員・タスク・操作履歴をすべて削除します。部署と準備ルールは初期設定に戻ります。この操作は取り消せません。"
+        message="社員・タスク・問い合わせ・FAQ・操作履歴をすべて削除します。部署・準備ルール・問い合わせカテゴリは初期設定に戻ります。この操作は取り消せません。"
         onConfirm={() => run((s) => s.clearBusinessData(), '社員・タスクを全削除しました')}
         onClose={() => setConfirmClear(false)}
       />

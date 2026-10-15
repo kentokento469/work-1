@@ -1,4 +1,4 @@
-import { EMPLOYEE_STATUS_LABEL, PRIORITY_LABEL, TASK_STATUS_LABEL, type DataSnapshot } from '../domain/types';
+import { EMPLOYEE_STATUS_LABEL, INQUIRY_STATUS_LABEL, PRIORITY_LABEL, TASK_STATUS_LABEL, type DataSnapshot } from '../domain/types';
 
 /** Excel で UTF-8 として認識させるための BOM */
 export const UTF8_BOM = '﻿';
@@ -52,13 +52,45 @@ export function tasksToCsv(data: Pick<DataSnapshot, 'tasks' | 'employees' | 'dep
         PRIORITY_LABEL[t.priority],
         t.dueDate,
         TASK_STATUS_LABEL[t.status],
-        t.source === 'onboarding' ? '入社準備(自動)' : '手動',
+        t.source === 'onboarding' ? '入社準備(自動)' : t.source === 'inquiry' ? '問い合わせ' : '手動',
         t.completedAt ?? '',
         t.description,
       ];
     });
   return toCsv(
     ['タスク名', '対象社員番号', '対象社員', '担当部署', '担当者', '優先度', '期限', '進捗状況', '登録元', '完了日時', '詳細'],
+    rows,
+  );
+}
+
+export function inquiriesToCsv(data: Pick<DataSnapshot, 'inquiries' | 'inquiryCategories' | 'departments' | 'tasks'>): string {
+  const cat = new Map(data.inquiryCategories.map((c) => [c.id, c.name]));
+  const dept = new Map(data.departments.map((d) => [d.id, d.name]));
+  const rows = [...data.inquiries]
+    .sort((a, b) => a.number.localeCompare(b.number))
+    .map((i) => {
+      const tasks = data.tasks.filter((t) => t.inquiryId === i.id);
+      return [
+        i.number,
+        i.receivedAt,
+        i.requesterName,
+        i.requesterDepartmentId ? (dept.get(i.requesterDepartmentId) ?? '') : '',
+        i.title,
+        cat.get(i.categoryId) ?? '',
+        PRIORITY_LABEL[i.priority],
+        INQUIRY_STATUS_LABEL[i.status],
+        i.assignee,
+        i.dueDate,
+        i.resolvedAt ?? '',
+        i.closedAt ?? '',
+        // "1/2" は Excel で日付に変換されるため文字で表す
+        `完了${tasks.filter((t) => t.status === 'done').length}・全${tasks.length}`,
+        i.body,
+        i.resolution,
+      ];
+    });
+  return toCsv(
+    ['問い合わせ番号', '受付日時', '申請者', '所属部署', '件名', 'カテゴリ', '優先度', 'ステータス', '担当者', '対応期限', '解決日時', '完了日時', '対応タスク', '詳細', '解決内容'],
     rows,
   );
 }

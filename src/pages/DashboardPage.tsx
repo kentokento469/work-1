@@ -8,6 +8,7 @@ import {
   CircleCheckBig,
   ClipboardList,
   Flame,
+  Headset,
   ListTodo,
   PieChart,
   UserPlus,
@@ -18,6 +19,9 @@ import { useAppData } from '../app/AppData';
 import { navigate } from '../app/router';
 import { formatDateJa, formatDateTimeJa } from '../domain/date';
 import { TASK_STATUS_LABEL, type ActivityCategory } from '../domain/types';
+import type { AttentionKind } from '../domain/analytics';
+import { formatHours } from '../domain/helpdesk/analytics';
+import { DemoGuide } from '../features/DemoGuide';
 import { HorizontalBarChart, ProgressBar, ProgressRing, StackedBar } from '../ui/charts';
 import { Badge, Card, CardHeader, EmptyState, PageHeader, cx } from '../ui/primitives';
 import { DEMO_COMPANY_NAME } from '../demo/demoData';
@@ -77,6 +81,14 @@ function StatCard({
   );
 }
 
+const ATTENTION_LABEL: Record<AttentionKind, string> = {
+  overdue: '期限超過',
+  due_soon: '期限間近',
+  unprepared_hire: '準備未着手',
+  inquiry_overdue: '問合せ超過',
+  inquiry_new_high: '高・未着手',
+};
+
 const CATEGORY_LABEL: Record<ActivityCategory, string> = {
   employee: '社員',
   task: 'タスク',
@@ -84,6 +96,9 @@ const CATEGORY_LABEL: Record<ActivityCategory, string> = {
   rule: 'ルール',
   department: '部署',
   data: 'データ',
+  inquiry: '問い合わせ',
+  faq: 'FAQ',
+  category: 'カテゴリ',
 };
 
 export function DashboardPage() {
@@ -93,6 +108,7 @@ export function DashboardPage() {
   return (
     <>
       <PageHeader title="ダッシュボード" description={`${DEMO_COMPANY_NAME}（架空）の業務状況をリアルタイムに集計しています`} />
+      <DemoGuide />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
         <StatCard label="登録社員数" value={s.employeeCount} unit="名" icon={Users} tone="navy" href="#/employees" sub={`在籍 ${s.activeCount}名（退職者除く）`} />
@@ -120,6 +136,8 @@ export function DashboardPage() {
         />
       </div>
 
+      <HelpdeskSummary />
+
       <div className="mt-4 grid gap-4 lg:grid-cols-5">
         <Card className="lg:col-span-3">
           <CardHeader title="優先対応が必要な業務" icon={Flame} description="期限超過・期限間近（3日以内）・入社準備の未着手を自動抽出" />
@@ -131,27 +149,35 @@ export function DashboardPage() {
                 {s.attention.slice(0, 7).map((a) => (
                   <li key={a.id}>
                     <a
-                      href={a.employeeId ? `#/onboarding?employee=${a.employeeId}` : `#/tasks?focus=${a.taskId}`}
+                      href={a.inquiryId ? `#/helpdesk/${a.inquiryId}` : a.employeeId ? `#/onboarding?employee=${a.employeeId}` : `#/tasks?focus=${a.taskId}`}
                       className="flex min-h-14 items-center gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-slate-50 dark:hover:bg-navy-800/60"
                     >
                       <span
                         className={cx(
                           'flex size-8 shrink-0 items-center justify-center rounded-full',
-                          a.kind === 'overdue'
+                          a.kind === 'overdue' || a.kind === 'inquiry_overdue'
                             ? 'bg-red-50 text-red-600 dark:bg-red-950 dark:text-red-400'
                             : a.kind === 'due_soon'
                               ? 'bg-amber-50 text-amber-600 dark:bg-amber-950 dark:text-amber-400'
                               : 'bg-violet-50 text-violet-600 dark:bg-violet-950 dark:text-violet-300',
                         )}
                       >
-                        {a.kind === 'overdue' ? <AlertTriangle className="size-4" /> : a.kind === 'due_soon' ? <CalendarClock className="size-4" /> : <UserPlus className="size-4" />}
+                        {a.kind === 'overdue' ? (
+                          <AlertTriangle className="size-4" />
+                        ) : a.kind === 'due_soon' ? (
+                          <CalendarClock className="size-4" />
+                        ) : a.kind === 'unprepared_hire' ? (
+                          <UserPlus className="size-4" />
+                        ) : (
+                          <Headset className="size-4" />
+                        )}
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-semibold text-slate-800 dark:text-slate-100">{a.title}</span>
                         <span className="block truncate text-xs text-slate-500 dark:text-slate-400">{a.detail}</span>
                       </span>
-                      <Badge tone={a.kind === 'overdue' ? 'red' : a.kind === 'due_soon' ? 'amber' : 'violet'}>
-                        {a.kind === 'overdue' ? '期限超過' : a.kind === 'due_soon' ? '期限間近' : '準備未着手'}
+                      <Badge tone={a.kind === 'overdue' || a.kind === 'inquiry_overdue' ? 'red' : a.kind === 'due_soon' ? 'amber' : 'violet'}>
+                        {ATTENTION_LABEL[a.kind]}
                       </Badge>
                       <ChevronRight className="size-4 shrink-0 text-slate-300" aria-hidden />
                     </a>
@@ -259,5 +285,52 @@ export function DashboardPage() {
       </Card>
       <p className="mt-4 text-center text-[11px] text-slate-400">基準日 {formatDateJa(today)}・社員 {empById.size}名のデータを集計</p>
     </>
+  );
+}
+
+function HelpdeskSummary() {
+  const { helpdeskStats: h } = useAppData();
+  const items = [
+    { label: '未対応', value: `${h.newCount}`, unit: '件', href: '#/helpdesk?status=new', tone: h.newCount > 0 ? 'text-violet-700 dark:text-violet-300' : '' },
+    { label: '対応中', value: `${h.inProgressCount + h.waitingCount + h.onHoldCount}`, unit: '件', href: '#/helpdesk?status=working', tone: '' },
+    { label: '解決済み', value: `${h.resolvedCount + h.closedCount}`, unit: '件', href: '#/helpdesk?status=done', tone: '' },
+    { label: '期限超過', value: `${h.overdueCount}`, unit: '件', href: '#/helpdesk?status=overdue', tone: h.overdueCount > 0 ? 'text-red-600 dark:text-red-400' : '' },
+    {
+      label: '平均解決時間',
+      value: h.avgResolutionHours.status === 'ok' ? formatHours(h.avgResolutionHours.value) : 'データ不足',
+      unit: '',
+      href: '#/helpdesk?view=analytics',
+      tone: h.avgResolutionHours.status === 'ok' ? '' : 'text-sm text-slate-400',
+    },
+  ];
+  return (
+    <Card className="mt-4">
+      <CardHeader
+        title="ヘルプデスク"
+        icon={Headset}
+        description={`問い合わせ ${h.total}件の状況（タップで一覧）`}
+        action={
+          <a href="#/helpdesk?view=analytics" className="py-1 text-xs font-semibold text-navy-600 dark:text-navy-300">
+            分析を見る
+          </a>
+        }
+      />
+      <div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-5 sm:p-4" data-testid="helpdesk-summary">
+        {items.map((k, i) => (
+          <a
+            key={k.label}
+            href={k.href}
+            className={cx('rounded-xl bg-slate-50 px-3 py-2.5 transition-colors hover:bg-slate-100 dark:bg-navy-950 dark:hover:bg-navy-800', i === 4 && 'col-span-2 sm:col-span-1')}
+            data-testid={`hd-summary-${k.label}`}
+          >
+            <p className="text-[11px] font-semibold text-slate-500">{k.label}</p>
+            <p className={cx('mt-0.5 text-xl font-bold tabular-nums text-slate-900 dark:text-white', k.tone)}>
+              {k.value}
+              {k.unit && <span className="ml-0.5 text-xs font-normal text-slate-400">{k.unit}</span>}
+            </p>
+          </a>
+        ))}
+      </div>
+    </Card>
   );
 }

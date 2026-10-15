@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useQueryState } from '../app/hooks';
 import { ClipboardList, Plus, Search, X } from 'lucide-react';
 import { useAppData } from '../app/AppData';
 import { isTaskOverdue } from '../domain/analytics';
 import { PRIORITIES, PRIORITY_LABEL, PRIORITY_WEIGHT, TASK_STATUS_LABEL, type Task } from '../domain/types';
 import { TaskFormModal } from '../features/TaskFormModal';
 import { TaskItem } from '../features/TaskItem';
-import { Button, Card, EmptyState, FilterSelect, PageHeader, cx } from '../ui/primitives';
+import { Button, Card, EmptyState, FilterDisclosure, FilterSelect, PageHeader, cx } from '../ui/primitives';
 
 type StatusFilter = 'all' | 'open' | 'overdue' | 'todo' | 'in_progress' | 'on_hold' | 'done';
 const STATUS_TABS: { key: StatusFilter; label: string }[] = [
@@ -22,13 +23,17 @@ type SortKey = 'due' | 'priority' | 'updated';
 
 export function TasksPage({ query }: { query: URLSearchParams }) {
   const { data, today, empById } = useAppData();
-  const initialStatus = (query.get('status') as StatusFilter | null) ?? 'open';
-  const [status, setStatus] = useState<StatusFilter>(STATUS_TABS.some((t) => t.key === initialStatus) ? initialStatus : 'open');
-  const [keyword, setKeyword] = useState('');
-  const [priority, setPriority] = useState('');
-  const [dept, setDept] = useState('');
-  const [employee, setEmployee] = useState(query.get('employee') ?? '');
-  const [sort, setSort] = useState<SortKey>('due');
+  // 検索条件は URL に保存し、他画面から戻っても保持する
+  const [f, setF] = useQueryState({ status: 'open', q: '', priority: '', dept: '', employee: '', source: '', sort: 'due' });
+  const status = (STATUS_TABS.some((t) => t.key === f.status) ? f.status : 'open') as StatusFilter;
+  const { q: keyword, priority, dept, employee, source } = f;
+  const sort = f.sort as SortKey;
+  const setStatus = (v: StatusFilter) => setF({ status: v });
+  const setKeyword = (v: string) => setF({ q: v });
+  const setPriority = (v: string) => setF({ priority: v });
+  const setDept = (v: string) => setF({ dept: v });
+  const setEmployee = (v: string) => setF({ employee: v });
+  const setSort = (v: SortKey) => setF({ sort: v });
   const [editing, setEditing] = useState<Task | null>(null);
   const [creating, setCreating] = useState(false);
 
@@ -63,6 +68,7 @@ export function TasksPage({ query }: { query: URLSearchParams }) {
       if (priority && t.priority !== priority) return false;
       if (dept && t.assigneeDepartmentId !== dept) return false;
       if (employee && t.employeeId !== employee) return false;
+      if (source && t.source !== source) return false;
       if (kw) {
         const e = t.employeeId ? empById.get(t.employeeId) : undefined;
         const hay = `${t.title} ${t.description} ${t.assignee} ${e?.name ?? ''}`.toLowerCase();
@@ -78,10 +84,10 @@ export function TasksPage({ query }: { query: URLSearchParams }) {
       const db = b.status === 'done' ? 1 : 0;
       return da - db || a.dueDate.localeCompare(b.dueDate) || PRIORITY_WEIGHT[b.priority] - PRIORITY_WEIGHT[a.priority];
     });
-  }, [data.tasks, status, priority, dept, employee, keyword, sort, today, empById]);
+  }, [data.tasks, status, priority, dept, employee, source, keyword, sort, today, empById]);
 
   const filteredEmployee = employee ? empById.get(employee) : undefined;
-  const hasExtra = keyword || priority || dept || employee;
+  const hasExtra = keyword || priority || dept || employee || source;
 
   return (
     <>
@@ -118,7 +124,7 @@ export function TasksPage({ query }: { query: URLSearchParams }) {
       </div>
 
       <Card className="p-3 sm:p-4">
-        <div className="grid gap-2 md:grid-cols-[1fr_8rem_10rem_12rem_8rem]">
+        <div className="grid grid-cols-[1fr_auto] gap-2 md:grid-cols-[1fr_8rem_9rem_10rem_8rem_8rem]">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" aria-hidden />
             <input
@@ -130,7 +136,7 @@ export function TasksPage({ query }: { query: URLSearchParams }) {
               className="h-11 w-full rounded-lg border border-slate-300 bg-white pl-9 pr-3 shadow-sm focus:border-navy-500 focus:outline-none focus:ring-2 focus:ring-navy-500/25 dark:border-navy-700 dark:bg-navy-950"
             />
           </div>
-          <div className="grid grid-cols-2 gap-2 md:contents">
+          <FilterDisclosure activeCount={[priority, dept, employee, source].filter(Boolean).length + (sort !== 'due' ? 1 : 0)} className="col-span-2">
             <FilterSelect label="優先度" value={priority} onChange={setPriority} options={[{ value: '', label: '全優先度' }, ...PRIORITIES.map((p) => ({ value: p, label: `優先度 ${PRIORITY_LABEL[p]}` }))]} />
             <FilterSelect label="担当部署" value={dept} onChange={setDept} options={[{ value: '', label: '全担当部署' }, ...data.departments.map((d) => ({ value: d.id, label: d.name }))]} />
             <FilterSelect
@@ -145,6 +151,17 @@ export function TasksPage({ query }: { query: URLSearchParams }) {
               ]}
             />
             <FilterSelect
+              label="生成元"
+              value={source}
+              onChange={(v) => setF({ source: v })}
+              options={[
+                { value: '', label: '全生成元' },
+                { value: 'manual', label: '手動作成' },
+                { value: 'onboarding', label: '入社準備' },
+                { value: 'inquiry', label: '問い合わせ' },
+              ]}
+            />
+            <FilterSelect
               label="並び順"
               value={sort}
               onChange={(v) => setSort(v as SortKey)}
@@ -154,7 +171,7 @@ export function TasksPage({ query }: { query: URLSearchParams }) {
                 { value: 'updated', label: '更新順' },
               ]}
             />
-          </div>
+          </FilterDisclosure>
         </div>
         <div className="mt-2 flex items-center justify-between px-1 text-xs text-slate-500">
           <span data-testid="task-count">
@@ -165,12 +182,7 @@ export function TasksPage({ query }: { query: URLSearchParams }) {
             <button
               type="button"
               className="inline-flex min-h-9 items-center gap-1 font-semibold text-navy-600 dark:text-navy-300"
-              onClick={() => {
-                setKeyword('');
-                setPriority('');
-                setDept('');
-                setEmployee('');
-              }}
+              onClick={() => setF({ q: '', priority: '', dept: '', employee: '', source: '' })}
             >
               <X className="size-3.5" />
               条件をクリア

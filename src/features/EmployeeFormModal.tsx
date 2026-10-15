@@ -4,7 +4,7 @@ import { useAppData } from '../app/AppData';
 import { EMPLOYEE_STATUSES, EMPLOYEE_STATUS_LABEL, EMPLOYMENT_TYPES, type Employee, type EmployeeStatus, type EmploymentType } from '../domain/types';
 import { normalizeEmployeeNumber, suggestEmployeeStatus, validateEmployee, type EmployeeInput, type FieldErrors } from '../domain/validation';
 import { AppError } from '../services/workcoreService';
-import { Modal } from '../ui/Modal';
+import { Modal, ModalCancelButton } from '../ui/Modal';
 import { Button, SelectField, TextAreaField, TextField } from '../ui/primitives';
 
 /** 既存の社員番号から次の番号を提案する (例: A0104 → A0105) */
@@ -120,13 +120,12 @@ export function EmployeeFormModal({
     <Modal
       open={open}
       onClose={onClose}
+      dirty={JSON.stringify(form) !== JSON.stringify(initial)}
       title={employee ? '社員情報の編集' : '社員の新規登録'}
       description={employee ? undefined : '入社予定者を登録すると、入社準備タスクを自動生成できます'}
       footer={
         <>
-          <Button variant="secondary" onClick={onClose} disabled={saving}>
-            キャンセル
-          </Button>
+          <ModalCancelButton disabled={saving} />
           <Button type="submit" form="employee-form" icon={Save} loading={saving}>
             {employee ? '更新する' : '登録する'}
           </Button>

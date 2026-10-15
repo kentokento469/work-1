@@ -1,5 +1,5 @@
-import { forwardRef, useId, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
-import type { LucideIcon } from 'lucide-react';
+import { forwardRef, useId, useState, type ButtonHTMLAttributes, type HTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react';
+import { SlidersHorizontal, type LucideIcon } from 'lucide-react';
 
 export function cx(...classes: (string | false | null | undefined)[]): string {
   return classes.filter(Boolean).join(' ');
@@ -71,9 +71,14 @@ export function IconButton({ icon: Icon, label, className, ...rest }: ButtonHTML
 
 // ---------- Card ----------
 
-export function Card({ className, children, as: Tag = 'section' }: { className?: string; children: ReactNode; as?: 'section' | 'div' | 'article' }) {
+export function Card({
+  className,
+  children,
+  as: Tag = 'section',
+  ...rest
+}: { className?: string; children: ReactNode; as?: 'section' | 'div' | 'article' } & Omit<HTMLAttributes<HTMLElement>, 'className' | 'children'>) {
   return (
-    <Tag className={cx('min-w-0 rounded-2xl border border-slate-200/80 bg-white shadow-[0_1px_2px_rgba(15,31,61,0.04)] dark:border-navy-800 dark:bg-navy-900', className)}>
+    <Tag className={cx('min-w-0 rounded-2xl border border-slate-200/80 bg-white shadow-[0_1px_2px_rgba(15,31,61,0.04)] dark:border-navy-800 dark:bg-navy-900', className)} {...rest}>
       {children}
     </Tag>
   );
@@ -263,5 +268,29 @@ export function PageHeader({ title, description, actions }: { title: string; des
       </div>
       {actions && <div className="flex shrink-0 flex-wrap gap-2">{actions}</div>}
     </div>
+  );
+}
+
+/**
+ * 詳細フィルターの折りたたみ (段階的開示)。
+ * スマホでは検索欄だけを常に表示し、条件は「絞り込み」から開く。PCでは常に展開する。
+ * 条件が設定されている場合は件数を表示し、隠れた条件で結果が絞られていることに気づけるようにする。
+ */
+export function FilterDisclosure({ activeCount, children, className }: { activeCount: number; children: ReactNode; className?: string }) {
+  const [open, setOpen] = useState(activeCount > 0);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-600 md:hidden dark:border-navy-700 dark:bg-navy-950 dark:text-slate-300"
+      >
+        <SlidersHorizontal className="size-4" aria-hidden />
+        絞り込み
+        {activeCount > 0 && <span className="rounded-full bg-navy-700 px-1.5 text-[11px] text-white">{activeCount}</span>}
+      </button>
+      <div className={cx(open ? 'grid' : 'hidden', 'grid-cols-2 gap-2 md:contents', className)}>{children}</div>
+    </>
   );
 }

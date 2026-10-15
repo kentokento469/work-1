@@ -13,6 +13,10 @@ function toNextBusinessDay(d: ISODate): ISODate {
   return v;
 }
 import { generateId } from '../domain/id';
+import { createDefaultInquiryCategories } from '../domain/helpdesk/defaults';
+import { createHelpdeskDemoData } from './helpdeskDemo';
+
+export { createHelpdeskDemoData } from './helpdeskDemo';
 import type {
   ActivityLog,
   DataSnapshot,
@@ -206,6 +210,7 @@ export function createDemoData(today: ISODate): DataSnapshot {
       status,
       source: 'manual',
       ruleId: null,
+      inquiryId: null,
       createdAt: ts,
       updatedAt: ts,
       completedAt: status === 'done' ? new Date(`${dueDate}T15:00:00`).toISOString() : null,
@@ -240,5 +245,21 @@ export function createDemoData(today: ISODate): DataSnapshot {
     act(90, 'task', 'status', 'タスク「入社書類確認」を「完了」に変更しました'),
   ];
 
-  return { departments, employees, tasks, rules, activities };
+  const inquiryCategories = createDefaultInquiryCategories();
+  const helpdesk = createHelpdeskDemoData(today, employees, inquiryCategories, departments.map((d) => d.id));
+  activities.push(
+    act(60 * 4, 'inquiry', 'create', `問い合わせ ${helpdesk.inquiries.at(-2)?.number ?? ''} を受け付けました`),
+    act(60 * 2, 'inquiry', 'create', `問い合わせ ${helpdesk.inquiries.at(-1)?.number ?? ''} を受け付けました`),
+  );
+
+  return {
+    departments,
+    employees,
+    tasks: [...tasks, ...helpdesk.tasks],
+    rules,
+    activities,
+    inquiries: helpdesk.inquiries,
+    faqs: helpdesk.faqs,
+    inquiryCategories,
+  };
 }

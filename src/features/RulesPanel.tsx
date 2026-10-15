@@ -5,7 +5,7 @@ import { EMPLOYMENT_TYPES, PRIORITIES, PRIORITY_LABEL, type Department, type Emp
 import { validateRule, type FieldErrors, type RuleInput } from '../domain/validation';
 import { AppError } from '../services/workcoreService';
 import { PriorityBadge } from '../ui/badges';
-import { ConfirmDialog, Modal } from '../ui/Modal';
+import { ConfirmDialog, Modal, ModalCancelButton } from '../ui/Modal';
 import { Badge, Button, Card, CardHeader, EmptyState, IconButton, SelectField, TextAreaField, TextField, cx } from '../ui/primitives';
 
 export function offsetLabel(days: number): string {
@@ -17,8 +17,6 @@ export function RulesPanel() {
   const { data, deptById, run } = useAppData();
   const [editing, setEditing] = useState<OnboardingRule | null>(null);
   const [creating, setCreating] = useState(false);
-  const [deleting, setDeleting] = useState<OnboardingRule | null>(null);
-
   const groups = useMemo(() => {
     const scopes: { key: string; label: string }[] = [{ key: 'common', label: '全社共通' }, ...data.departments.map((d) => ({ key: d.id, label: d.name }))];
     return scopes.map((s) => ({ ...s, rules: data.rules.filter((r) => r.scope === s.key).sort((a, b) => a.order - b.order) }));
@@ -75,7 +73,12 @@ export function RulesPanel() {
                     />
                   </label>
                   <IconButton icon={Pencil} label={`${r.title}を編集`} onClick={() => setEditing(r)} />
-                  <IconButton icon={Trash2} label={`${r.title}を削除`} onClick={() => setDeleting(r)} className="hover:text-red-600" />
+                  <IconButton
+                    icon={Trash2}
+                    label={`${r.title}を削除`}
+                    onClick={() => run((s) => s.deleteRule(r.id), `ルール「${r.title}」を削除しました`, { undo: (rule) => (s) => s.restoreRule(rule) }).catch(() => undefined)}
+                    className="hover:text-red-600"
+                  />
                 </li>
               ))}
             </ul>
@@ -83,19 +86,16 @@ export function RulesPanel() {
         </Card>
       ))}
 
-      <DepartmentsCard />
+      <p className="text-center text-xs text-slate-500">
+        部署の追加・名称変更は
+        <a href="#/settings" className="mx-1 font-semibold text-navy-600 underline dark:text-navy-300">
+          設定
+        </a>
+        から行えます。
+      </p>
 
       <RuleFormModal open={creating} onClose={() => setCreating(false)} />
       <RuleFormModal open={!!editing} onClose={() => setEditing(null)} rule={editing ?? undefined} />
-      <ConfirmDialog
-        open={!!deleting}
-        danger
-        title="ルールを削除しますか？"
-        confirmLabel="削除する"
-        message={<>「{deleting?.title}」を削除します。生成済みのタスクは削除されません。</>}
-        onConfirm={() => (deleting ? run((s) => s.deleteRule(deleting.id), 'ルールを削除しました') : undefined)}
-        onClose={() => setDeleting(null)}
-      />
     </div>
   );
 }
@@ -161,12 +161,11 @@ function RuleFormModal({ open, onClose, rule }: { open: boolean; onClose: () => 
     <Modal
       open={open}
       onClose={onClose}
+      dirty={JSON.stringify(form) !== JSON.stringify(initial) || offsetText !== String(initial.offsetDays)}
       title={rule ? '準備ルールの編集' : '準備ルールの追加'}
       footer={
         <>
-          <Button variant="secondary" onClick={onClose} disabled={saving}>
-            キャンセル
-          </Button>
+          <ModalCancelButton disabled={saving} />
           <Button type="submit" form="rule-form" icon={Save} loading={saving}>
             保存する
           </Button>
@@ -243,7 +242,7 @@ function RuleFormModal({ open, onClose, rule }: { open: boolean; onClose: () => 
   );
 }
 
-function DepartmentsCard() {
+export function DepartmentsCard() {
   const { data, run } = useAppData();
   const [name, setName] = useState('');
   const [editing, setEditing] = useState<Department | null>(null);

@@ -27,7 +27,7 @@ async function gotoHash(page: Page, hash: string) {
 const NAME = 'テスト 新人';
 const NUMBER = 'T9001';
 
-test('入社登録からバックアップ復元・再読み込みまでの業務フロー', async ({ page }) => {
+test('[Phase1] 入社登録からバックアップ復元・再読み込みまでの業務フロー', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
 
@@ -149,12 +149,18 @@ test('入社登録からバックアップ復元・再読み込みまでの業�
   expect(errors).toEqual([]);
 });
 
-test('ナビゲーション・テーマ切替・入力エラー表示', async ({ page, isMobile }) => {
+test('[Phase1] ナビゲーション・テーマ切替・入力エラー表示', async ({ page, isMobile }) => {
   await page.goto('/');
   const nav = page.getByRole('navigation', { name: 'メインメニュー' }).filter({ visible: true });
   await nav.getByRole('link', { name: isMobile ? 'タスク' : 'タスク管理' }).click();
   await expect(page.getByRole('heading', { name: 'タスク管理' })).toBeVisible();
-  await nav.getByRole('link', { name: '入社準備' }).click();
+  if (isMobile) {
+    // スマホでは入社準備は「メニュー」内
+    await nav.getByRole('link', { name: 'メニュー' }).click();
+    await page.getByRole('link', { name: /入社準備/ }).click();
+  } else {
+    await nav.getByRole('link', { name: '入社準備' }).click();
+  }
   await page.getByRole('tab', { name: '準備ルール設定' }).click();
   await expect(page.getByRole('heading', { name: '全社共通' })).toBeVisible();
 

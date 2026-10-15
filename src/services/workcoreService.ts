@@ -1,46 +1,35 @@
 /**
- * アプリケーションサービス層。
+ * アプリケーションサービス層 (社員・タスク・入社準備・部署・データ管理)。
  * 画面からの操作はすべてここを経由し、検証 → 永続化 → 操作履歴記録 を1トランザクションで行う。
  * UI (React) には依存しないため、テストや将来のAPI化でもそのまま使える。
+ * ヘルプデスク関連は HelpdeskService (this.helpdesk) に分離している。
  */
 import { buildOnboardingPlan, materializePlan, type OnboardingPlan, type PlanItemOverride } from '../automation/onboardingEngine';
 import { today as todayISO } from '../domain/date';
 import { generateId, nowISO } from '../domain/id';
-import {
-  normalizeEmployeeNumber,
-  validateEmployee,
-  validateRule,
-  validateTask,
-  type EmployeeInput,
-  type FieldErrors,
-  type RuleInput,
-  type TaskInput,
-} from '../domain/validation';
-import type { ActivityCategory, ActivityLog, DataSnapshot, Department, Employee, OnboardingRule, Task, TaskStatus } from '../domain/types';
-import { TASK_STATUS_LABEL } from '../domain/types';
+import { normalizeEmployeeNumber, validateEmployee, validateRule, validateTask, type EmployeeInput, type RuleInput, type TaskInput } from '../domain/validation';
+import { TASK_STATUS_LABEL, type DataSnapshot, type Department, type Employee, type OnboardingRule, type Task, type TaskStatus } from '../domain/types';
 import type { BackupFile } from '../data/backup';
-import type { IDBPTransaction, StoreNames } from 'idb';
-import { STORE_NAMES, type WorkCoreDB, type WorkCoreSchema } from '../data/db';
-import { createDemoData } from '../demo/demoData';
+import { STORE_NAMES, type WorkCoreDB } from '../data/db';
+import { createDemoData, createHelpdeskDemoData } from '../demo/demoData';
+import { createDefaultInquiryCategories } from '../domain/helpdesk/defaults';
+import { AppError, abortWith, appendInquiryEvent, fieldError, inquiryEvent, logActivity, type WriteTx } from './common';
+import { HelpdeskService } from './helpdeskService';
 
-export class AppError extends Error {
-  constructor(message: string, public readonly fieldErrors: Record<string, string> = {}) {
-    super(message);
-    this.name = 'AppError';
-  }
+export { AppError } from './common';
+
+/** 削除の取り消し (Undo) 用に保持するデータ */
+export interface DeletedEmployee {
+  employee: Employee;
+  tasks: Task[];
 }
-
-function fail<T>(errors: FieldErrors<T>): never {
-  const fieldErrors = errors as Record<string, string>;
-  throw new AppError(Object.values(fieldErrors)[0] ?? '入力内容を確認してください', fieldErrors);
-}
-
-const MAX_ACTIVITIES = 300;
-
-type WriteTx = IDBPTransaction<WorkCoreSchema, StoreNames<WorkCoreSchema>[], 'readwrite'>;
 
 export class WorkCoreService {
-  constructor(private readonly db: WorkCoreDB, private readonly clock: () => string = todayISO) {}
+  readonly helpdesk: HelpdeskService;
+
+  constructor(private readonly db: WorkCoreDB, private readonly clock: () => string = todayISO) {
+    this.helpdesk = new HelpdeskService(db, clock);
+  }
 
   today(): string {
     return this.clock();
@@ -49,18 +38,24 @@ export class WorkCoreService {
   // ---------- 読み込み ----------
 
   async loadSnapshot(): Promise<DataSnapshot> {
-    const tx = this.db.transaction(['departments', 'employees', 'tasks', 'rules', 'activities'], 'readonly');
-    const [departments, employees, tasks, rules, activities] = await Promise.all([
+    const stores = ['departments', 'employees', 'tasks', 'rules', 'activities', 'inquiries', 'faqs', 'inquiryCategories'] as const;
+    const tx = this.db.transaction([...stores], 'readonly');
+    const [departments, employees, tasks, rules, activities, inquiries, faqs, inquiryCategories] = await Promise.all([
       tx.objectStore('departments').getAll(),
       tx.objectStore('employees').getAll(),
       tx.objectStore('tasks').getAll(),
       tx.objectStore('rules').getAll(),
       tx.objectStore('activities').getAll(),
+      tx.objectStore('inquiries').getAll(),
+      tx.objectStore('faqs').getAll(),
+      tx.objectStore('inquiryCategories').getAll(),
     ]);
     await tx.done;
     departments.sort((a, b) => a.order - b.order);
     activities.sort((a, b) => b.at.localeCompare(a.at));
-    return { departments, employees, tasks, rules, activities };
+    inquiryCategories.sort((a, b) => a.order - b.order);
+    inquiries.sort((a, b) => b.receivedAt.localeCompare(a.receivedAt));
+    return { departments, employees, tasks, rules, activities, inquiries, faqs, inquiryCategories };
   }
 
   /** 初回起動時のみデモデータを投入する */
@@ -71,39 +66,17 @@ export class WorkCoreService {
     return true;
   }
 
-  // ---------- 操作履歴 ----------
-
-  private async log(tx: WriteTx, category: ActivityCategory, action: string, message: string, entityId: string | null = null) {
-    const entry: ActivityLog = { id: generateId('act'), at: nowISO(), category, action, message, entityId };
-    const store = tx.objectStore('activities');
-    await store.put(entry);
-    const count = await store.count();
-    if (count > MAX_ACTIVITIES) {
-      let cursor = await store.index('byAt').openCursor();
-      let toDelete = count - MAX_ACTIVITIES;
-      while (cursor && toDelete > 0) {
-        await cursor.delete();
-        toDelete--;
-        cursor = await cursor.continue();
-      }
-    }
-  }
-
   // ---------- 社員 ----------
 
   private async employeeContext(tx: WriteTx, selfId?: string) {
-    const [existing, departments] = await Promise.all([tx.objectStore('employees').getAll(), tx.objectStore('departments').getAll()]);
-    return { existing, departmentIds: departments.map((d) => d.id), selfId };
+    const [existing, departments] = await Promise.all([tx.objectStore('employees').getAll(), tx.objectStore('departments').getAllKeys()]);
+    return { existing, departmentIds: departments, selfId };
   }
 
   async createEmployee(input: EmployeeInput): Promise<Employee> {
     const tx = this.db.transaction(['employees', 'departments', 'activities'], 'readwrite');
     const v = validateEmployee(input, await this.employeeContext(tx));
-    if (!v.ok) {
-      tx.abort();
-      await tx.done.catch(() => undefined);
-      fail(v.errors);
-    }
+    if (!v.ok) return abortWith(tx, fieldError(v.errors));
     const now = nowISO();
     const employee: Employee = {
       ...input,
@@ -117,7 +90,7 @@ export class WorkCoreService {
       updatedAt: now,
     };
     await tx.objectStore('employees').add(employee);
-    await this.log(tx, 'employee', 'create', `社員「${employee.name}」(${employee.employeeNumber}) を登録しました`, employee.id);
+    await logActivity(tx, 'employee', 'create', `社員「${employee.name}」(${employee.employeeNumber}) を登録しました`, employee.id);
     await tx.done;
     return employee;
   }
@@ -125,17 +98,9 @@ export class WorkCoreService {
   async updateEmployee(id: string, input: EmployeeInput): Promise<Employee> {
     const tx = this.db.transaction(['employees', 'departments', 'activities'], 'readwrite');
     const current = await tx.objectStore('employees').get(id);
-    if (!current) {
-      tx.abort();
-      await tx.done.catch(() => undefined);
-      throw new AppError('対象の社員が見つかりません');
-    }
+    if (!current) return abortWith(tx, '対象の社員が見つかりません');
     const v = validateEmployee(input, await this.employeeContext(tx, id));
-    if (!v.ok) {
-      tx.abort();
-      await tx.done.catch(() => undefined);
-      fail(v.errors);
-    }
+    if (!v.ok) return abortWith(tx, fieldError(v.errors));
     const employee: Employee = {
       ...current,
       ...input,
@@ -147,26 +112,37 @@ export class WorkCoreService {
       updatedAt: nowISO(),
     };
     await tx.objectStore('employees').put(employee);
-    await this.log(tx, 'employee', 'update', `社員「${employee.name}」の情報を更新しました`, id);
+    await logActivity(tx, 'employee', 'update', `社員「${employee.name}」の情報を更新しました`, id);
     await tx.done;
     return employee;
   }
 
-  /** 社員を削除し、紐づくタスクも同時に削除する (孤立データを残さない) */
-  async deleteEmployee(id: string): Promise<{ deletedTasks: number }> {
+  /**
+   * 社員を削除し、紐づくタスクも同時に削除する (孤立データを残さない)。
+   * 問い合わせは受付時点の氏名を保持しているので履歴として残る。
+   * 戻り値は Undo 用。
+   */
+  async deleteEmployee(id: string): Promise<DeletedEmployee> {
     const tx = this.db.transaction(['employees', 'tasks', 'activities'], 'readwrite');
-    const emp = await tx.objectStore('employees').get(id);
-    if (!emp) {
-      tx.abort();
-      await tx.done.catch(() => undefined);
-      throw new AppError('対象の社員が見つかりません');
-    }
-    const taskKeys = await tx.objectStore('tasks').index('byEmployee').getAllKeys(id);
-    for (const k of taskKeys) await tx.objectStore('tasks').delete(k);
+    const employee = await tx.objectStore('employees').get(id);
+    if (!employee) return abortWith(tx, '対象の社員が見つかりません');
+    const tasks = await tx.objectStore('tasks').index('byEmployee').getAll(id);
+    for (const t of tasks) await tx.objectStore('tasks').delete(t.id);
     await tx.objectStore('employees').delete(id);
-    await this.log(tx, 'employee', 'delete', `社員「${emp.name}」を削除しました（関連タスク${taskKeys.length}件も削除）`, id);
+    await logActivity(tx, 'employee', 'delete', `社員「${employee.name}」を削除しました（関連タスク${tasks.length}件も削除）`, id);
     await tx.done;
-    return { deletedTasks: taskKeys.length };
+    return { employee, tasks };
+  }
+
+  /** deleteEmployee の取り消し。社員番号が他で使われていた場合は復元しない */
+  async restoreEmployee(deleted: DeletedEmployee): Promise<void> {
+    const tx = this.db.transaction(['employees', 'tasks', 'activities'], 'readwrite');
+    const dup = await tx.objectStore('employees').index('byNumber').get(deleted.employee.employeeNumber);
+    if (dup) return abortWith(tx, `社員番号「${deleted.employee.employeeNumber}」が既に使われているため元に戻せません`);
+    await tx.objectStore('employees').put(deleted.employee);
+    for (const t of deleted.tasks) await tx.objectStore('tasks').put(t);
+    await logActivity(tx, 'employee', 'restore', `社員「${deleted.employee.name}」の削除を取り消しました`, deleted.employee.id);
+    await tx.done;
   }
 
   // ---------- タスク ----------
@@ -179,11 +155,7 @@ export class WorkCoreService {
   async createTask(input: TaskInput): Promise<Task> {
     const tx = this.db.transaction(['tasks', 'employees', 'departments', 'activities'], 'readwrite');
     const v = validateTask(input, await this.taskContext(tx));
-    if (!v.ok) {
-      tx.abort();
-      await tx.done.catch(() => undefined);
-      fail(v.errors);
-    }
+    if (!v.ok) return abortWith(tx, fieldError(v.errors));
     const now = nowISO();
     const task: Task = {
       ...input,
@@ -193,30 +165,29 @@ export class WorkCoreService {
       description: input.description.trim(),
       source: 'manual',
       ruleId: null,
+      inquiryId: null,
       createdAt: now,
       updatedAt: now,
       completedAt: input.status === 'done' ? now : null,
     };
     await tx.objectStore('tasks').add(task);
-    await this.log(tx, 'task', 'create', `タスク「${task.title}」を作成しました`, task.id);
+    await logActivity(tx, 'task', 'create', `タスク「${task.title}」を作成しました`, task.id);
     await tx.done;
     return task;
   }
 
+  /** 問い合わせ由来のタスクの状態変化を、問い合わせの対応履歴にも残す */
+  private async reflectToInquiry(tx: WriteTx, before: Task, after: Task) {
+    if (!after.inquiryId || before.status === after.status) return;
+    await appendInquiryEvent(tx, after.inquiryId, inquiryEvent('task', `タスク「${after.title}」が「${TASK_STATUS_LABEL[after.status]}」になりました`));
+  }
+
   async updateTask(id: string, input: TaskInput): Promise<Task> {
-    const tx = this.db.transaction(['tasks', 'employees', 'departments', 'activities'], 'readwrite');
+    const tx = this.db.transaction(['tasks', 'employees', 'departments', 'activities', 'inquiries'], 'readwrite');
     const current = await tx.objectStore('tasks').get(id);
-    if (!current) {
-      tx.abort();
-      await tx.done.catch(() => undefined);
-      throw new AppError('対象のタスクが見つかりません');
-    }
+    if (!current) return abortWith(tx, '対象のタスクが見つかりません');
     const v = validateTask(input, await this.taskContext(tx));
-    if (!v.ok) {
-      tx.abort();
-      await tx.done.catch(() => undefined);
-      fail(v.errors);
-    }
+    if (!v.ok) return abortWith(tx, fieldError(v.errors));
     const now = nowISO();
     const task: Task = {
       ...current,
@@ -228,46 +199,54 @@ export class WorkCoreService {
       completedAt: input.status === 'done' ? (current.completedAt ?? now) : null,
     };
     await tx.objectStore('tasks').put(task);
+    await this.reflectToInquiry(tx, current, task);
     const statusChanged = current.status !== task.status;
-    await this.log(
+    await logActivity(
       tx,
       'task',
       'update',
-      statusChanged
-        ? `タスク「${task.title}」を「${TASK_STATUS_LABEL[task.status]}」に変更しました`
-        : `タスク「${task.title}」を更新しました`,
+      statusChanged ? `タスク「${task.title}」を「${TASK_STATUS_LABEL[task.status]}」に変更しました` : `タスク「${task.title}」を更新しました`,
       id,
     );
     await tx.done;
     return task;
   }
 
-  async setTaskStatus(id: string, status: TaskStatus): Promise<Task> {
-    const tx = this.db.transaction(['tasks', 'activities'], 'readwrite');
+  /** ステータス変更。戻り値の previous は Undo 用 */
+  async setTaskStatus(id: string, status: TaskStatus): Promise<Task & { previousStatus: TaskStatus }> {
+    const tx = this.db.transaction(['tasks', 'activities', 'inquiries'], 'readwrite');
     const current = await tx.objectStore('tasks').get(id);
-    if (!current) {
-      tx.abort();
-      await tx.done.catch(() => undefined);
-      throw new AppError('対象のタスクが見つかりません');
-    }
+    if (!current) return abortWith(tx, '対象のタスクが見つかりません');
     const now = nowISO();
     const task: Task = { ...current, status, updatedAt: now, completedAt: status === 'done' ? (current.completedAt ?? now) : null };
     await tx.objectStore('tasks').put(task);
-    await this.log(tx, 'task', 'status', `タスク「${task.title}」を「${TASK_STATUS_LABEL[status]}」に変更しました`, id);
+    await this.reflectToInquiry(tx, current, task);
+    await logActivity(tx, 'task', 'status', `タスク「${task.title}」を「${TASK_STATUS_LABEL[status]}」に変更しました`, id);
     await tx.done;
-    return task;
+    return { ...task, previousStatus: current.status };
   }
 
-  async deleteTask(id: string): Promise<void> {
-    const tx = this.db.transaction(['tasks', 'activities'], 'readwrite');
+  /** 削除したタスクを返す (Undo 用) */
+  async deleteTask(id: string): Promise<Task> {
+    const tx = this.db.transaction(['tasks', 'activities', 'inquiries'], 'readwrite');
     const current = await tx.objectStore('tasks').get(id);
-    if (!current) {
-      tx.abort();
-      await tx.done.catch(() => undefined);
-      throw new AppError('対象のタスクが見つかりません');
-    }
+    if (!current) return abortWith(tx, '対象のタスクが見つかりません');
     await tx.objectStore('tasks').delete(id);
-    await this.log(tx, 'task', 'delete', `タスク「${current.title}」を削除しました`, id);
+    if (current.inquiryId) await appendInquiryEvent(tx, current.inquiryId, inquiryEvent('task', `タスク「${current.title}」を削除しました`));
+    await logActivity(tx, 'task', 'delete', `タスク「${current.title}」を削除しました`, id);
+    await tx.done;
+    return current;
+  }
+
+  async restoreTask(task: Task): Promise<void> {
+    const tx = this.db.transaction(['tasks', 'employees', 'inquiries', 'activities'], 'readwrite');
+    if (await tx.objectStore('tasks').get(task.id)) return abortWith(tx, 'このタスクは既に存在します');
+    // 紐付け先が消えていたら紐付けを外して復元する
+    const employeeId = task.employeeId && (await tx.objectStore('employees').get(task.employeeId)) ? task.employeeId : null;
+    const inquiryId = task.inquiryId && (await tx.objectStore('inquiries').get(task.inquiryId)) ? task.inquiryId : null;
+    await tx.objectStore('tasks').put({ ...task, employeeId, inquiryId });
+    if (inquiryId) await appendInquiryEvent(tx, inquiryId, inquiryEvent('task', `タスク「${task.title}」の削除を取り消しました`));
+    await logActivity(tx, 'task', 'restore', `タスク「${task.title}」の削除を取り消しました`, task.id);
     await tx.done;
   }
 
@@ -298,11 +277,7 @@ export class WorkCoreService {
   async applyOnboarding(employeeId: string, overrides: Record<string, PlanItemOverride>): Promise<Task[]> {
     const tx = this.db.transaction(['employees', 'rules', 'tasks', 'departments', 'activities'], 'readwrite');
     const employee = await tx.objectStore('employees').get(employeeId);
-    if (!employee) {
-      tx.abort();
-      await tx.done.catch(() => undefined);
-      throw new AppError('対象の社員が見つかりません');
-    }
+    if (!employee) return abortWith(tx, '対象の社員が見つかりません');
     const [rules, existingTasks, departments] = await Promise.all([
       tx.objectStore('rules').getAll(),
       tx.objectStore('tasks').index('byEmployee').getAll(employeeId),
@@ -312,18 +287,12 @@ export class WorkCoreService {
     try {
       plan = buildOnboardingPlan({ employee, rules, existingTasks, departments, today: this.today() });
     } catch (e) {
-      tx.abort();
-      await tx.done.catch(() => undefined);
-      throw new AppError(e instanceof Error ? e.message : '計画を作成できませんでした');
+      return abortWith(tx, e instanceof Error ? e.message : '計画を作成できませんでした');
     }
     const tasks = materializePlan(plan, overrides, nowISO());
-    if (tasks.length === 0) {
-      tx.abort();
-      await tx.done.catch(() => undefined);
-      throw new AppError('登録対象のタスクがありません（すべて登録済みまたは未選択です）');
-    }
+    if (tasks.length === 0) return abortWith(tx, '登録対象のタスクがありません（すべて登録済みまたは未選択です）');
     for (const t of tasks) await tx.objectStore('tasks').add(t);
-    await this.log(tx, 'onboarding', 'generate', `${employee.name}さんの入社準備タスクを${tasks.length}件自動生成しました`, employeeId);
+    await logActivity(tx, 'onboarding', 'generate', `${employee.name}さんの入社準備タスクを${tasks.length}件自動生成しました`, employeeId);
     await tx.done;
     return tasks;
   }
@@ -334,20 +303,12 @@ export class WorkCoreService {
     const tx = this.db.transaction(['rules', 'departments', 'activities'], 'readwrite');
     const departmentIds = await tx.objectStore('departments').getAllKeys();
     const v = validateRule(input, { departmentIds });
-    if (!v.ok) {
-      tx.abort();
-      await tx.done.catch(() => undefined);
-      fail(v.errors);
-    }
+    if (!v.ok) return abortWith(tx, fieldError(v.errors));
     const now = nowISO();
     let rule: OnboardingRule;
     if (id) {
       const current = await tx.objectStore('rules').get(id);
-      if (!current) {
-        tx.abort();
-        await tx.done.catch(() => undefined);
-        throw new AppError('対象のルールが見つかりません');
-      }
+      if (!current) return abortWith(tx, '対象のルールが見つかりません');
       rule = { ...current, ...input, title: input.title.trim(), defaultAssignee: input.defaultAssignee.trim(), updatedAt: now };
     } else {
       const all = await tx.objectStore('rules').getAll();
@@ -362,22 +323,26 @@ export class WorkCoreService {
       };
     }
     await tx.objectStore('rules').put(rule);
-    await this.log(tx, 'rule', id ? 'update' : 'create', `入社準備ルール「${rule.title}」を${id ? '更新' : '追加'}しました`, rule.id);
+    await logActivity(tx, 'rule', id ? 'update' : 'create', `入社準備ルール「${rule.title}」を${id ? '更新' : '追加'}しました`, rule.id);
     await tx.done;
     return rule;
   }
 
-  async deleteRule(id: string): Promise<void> {
+  async deleteRule(id: string): Promise<OnboardingRule> {
     const tx = this.db.transaction(['rules', 'activities'], 'readwrite');
     const current = await tx.objectStore('rules').get(id);
-    if (!current) {
-      tx.abort();
-      await tx.done.catch(() => undefined);
-      throw new AppError('対象のルールが見つかりません');
-    }
+    if (!current) return abortWith(tx, '対象のルールが見つかりません');
     await tx.objectStore('rules').delete(id);
     // 生成済みタスクは業務記録として残す (ruleId は重複判定の履歴として保持)
-    await this.log(tx, 'rule', 'delete', `入社準備ルール「${current.title}」を削除しました`, id);
+    await logActivity(tx, 'rule', 'delete', `入社準備ルール「${current.title}」を削除しました`, id);
+    await tx.done;
+    return current;
+  }
+
+  async restoreRule(rule: OnboardingRule): Promise<void> {
+    const tx = this.db.transaction(['rules', 'activities'], 'readwrite');
+    await tx.objectStore('rules').put(rule);
+    await logActivity(tx, 'rule', 'restore', `入社準備ルール「${rule.title}」の削除を取り消しました`, rule.id);
     await tx.done;
   }
 
@@ -389,14 +354,10 @@ export class WorkCoreService {
     if (trimmed.length > 30) throw new AppError('部署名は30文字以内で入力してください');
     const tx = this.db.transaction(['departments', 'activities'], 'readwrite');
     const all = await tx.objectStore('departments').getAll();
-    if (all.some((d) => d.name === trimmed)) {
-      tx.abort();
-      await tx.done.catch(() => undefined);
-      throw new AppError(`部署「${trimmed}」は既に存在します`);
-    }
+    if (all.some((d) => d.name === trimmed)) return abortWith(tx, `部署「${trimmed}」は既に存在します`);
     const dept: Department = { id: generateId('dept'), name: trimmed, order: all.reduce((m, d) => Math.max(m, d.order), 0) + 1 };
     await tx.objectStore('departments').add(dept);
-    await this.log(tx, 'department', 'create', `部署「${trimmed}」を追加しました`, dept.id);
+    await logActivity(tx, 'department', 'create', `部署「${trimmed}」を追加しました`, dept.id);
     await tx.done;
     return dept;
   }
@@ -408,38 +369,34 @@ export class WorkCoreService {
     const tx = this.db.transaction(['departments', 'activities'], 'readwrite');
     const all = await tx.objectStore('departments').getAll();
     const current = all.find((d) => d.id === id);
-    if (!current || all.some((d) => d.id !== id && d.name === trimmed)) {
-      tx.abort();
-      await tx.done.catch(() => undefined);
-      throw new AppError(current ? `部署「${trimmed}」は既に存在します` : '対象の部署が見つかりません');
-    }
+    if (!current) return abortWith(tx, '対象の部署が見つかりません');
+    if (all.some((d) => d.id !== id && d.name === trimmed)) return abortWith(tx, `部署「${trimmed}」は既に存在します`);
     await tx.objectStore('departments').put({ ...current, name: trimmed });
-    await this.log(tx, 'department', 'update', `部署名を「${current.name}」から「${trimmed}」に変更しました`, id);
+    await logActivity(tx, 'department', 'update', `部署名を「${current.name}」から「${trimmed}」に変更しました`, id);
     await tx.done;
   }
 
-  /** 社員・タスク・ルールから参照されている部署は削除できない */
+  /** 社員・タスク・ルール・問い合わせカテゴリから参照されている部署は削除できない */
   async deleteDepartment(id: string): Promise<void> {
-    const tx = this.db.transaction(['departments', 'employees', 'tasks', 'rules', 'activities'], 'readwrite');
+    const tx = this.db.transaction(['departments', 'employees', 'tasks', 'rules', 'inquiryCategories', 'activities'], 'readwrite');
     const current = await tx.objectStore('departments').get(id);
-    const [empCount, tasks, rules] = await Promise.all([
+    if (!current) return abortWith(tx, '対象の部署が見つかりません');
+    const [empCount, tasks, rules, cats] = await Promise.all([
       tx.objectStore('employees').index('byDepartment').count(id),
       tx.objectStore('tasks').getAll(),
       tx.objectStore('rules').getAll(),
+      tx.objectStore('inquiryCategories').getAll(),
     ]);
     const taskCount = tasks.filter((t) => t.assigneeDepartmentId === id).length;
     const ruleCount = rules.filter((r) => r.scope === id || r.assigneeDepartmentId === id).length;
-    if (!current || empCount + taskCount + ruleCount > 0) {
-      tx.abort();
-      await tx.done.catch(() => undefined);
-      throw new AppError(
-        current
-          ? `この部署は使用中のため削除できません（社員${empCount}名・タスク${taskCount}件・ルール${ruleCount}件）`
-          : '対象の部署が見つかりません',
+    const catCount = cats.filter((c) => c.defaultDepartmentId === id).length;
+    if (empCount + taskCount + ruleCount + catCount > 0)
+      return abortWith(
+        tx,
+        `この部署は使用中のため削除できません（社員${empCount}名・タスク${taskCount}件・ルール${ruleCount}件・問い合わせカテゴリ${catCount}件）`,
       );
-    }
     await tx.objectStore('departments').delete(id);
-    await this.log(tx, 'department', 'delete', `部署「${current.name}」を削除しました`, id);
+    await logActivity(tx, 'department', 'delete', `部署「${current.name}」を削除しました`, id);
     await tx.done;
   }
 
@@ -447,14 +404,18 @@ export class WorkCoreService {
 
   private async replaceAll(data: DataSnapshot, message: string): Promise<void> {
     const tx = this.db.transaction([...STORE_NAMES], 'readwrite');
+    // 二重送信防止キー (meta の req:*) も含めて全消去する
     await Promise.all(STORE_NAMES.map((s) => tx.objectStore(s).clear()));
     for (const d of data.departments) await tx.objectStore('departments').put(d);
     for (const e of data.employees) await tx.objectStore('employees').put(e);
     for (const t of data.tasks) await tx.objectStore('tasks').put(t);
     for (const r of data.rules) await tx.objectStore('rules').put(r);
     for (const a of data.activities) await tx.objectStore('activities').put(a);
+    for (const c of data.inquiryCategories) await tx.objectStore('inquiryCategories').put(c);
+    for (const i of data.inquiries) await tx.objectStore('inquiries').put(i);
+    for (const f of data.faqs) await tx.objectStore('faqs').put(f);
     await tx.objectStore('meta').put({ key: 'initialized', value: nowISO() });
-    await this.log(tx, 'data', 'replace', message);
+    await logActivity(tx, 'data', 'replace', message);
     await tx.done;
   }
 
@@ -466,18 +427,42 @@ export class WorkCoreService {
     await this.replaceAll(createDemoData(this.today()), 'デモデータを初期化しました');
   }
 
-  /** 全データを削除し、部署とルールだけの空の状態にする */
+  /** 全データを削除し、部署・ルール・カテゴリだけの空の状態にする */
   async clearBusinessData(): Promise<void> {
     const demo = createDemoData(this.today());
     await this.replaceAll(
-      { departments: demo.departments, rules: demo.rules, employees: [], tasks: [], activities: [] },
-      '社員・タスクデータを全削除しました（部署・ルールは初期設定）',
+      { departments: demo.departments, rules: demo.rules, employees: [], tasks: [], activities: [], inquiries: [], faqs: [], inquiryCategories: createDefaultInquiryCategories() },
+      '社員・タスク・問い合わせを全削除しました（部署・ルール・カテゴリは初期設定）',
     );
+  }
+
+  /**
+   * Phase 1 からの移行ユーザー向け: 既存データを残したまま、ヘルプデスクのデモデータだけを追加する。
+   * 問い合わせが1件でもあれば何もしない (重複投入防止)。
+   */
+  async addHelpdeskDemo(): Promise<number> {
+    const tx = this.db.transaction(['inquiries', 'faqs', 'inquiryCategories', 'employees', 'tasks', 'departments', 'activities'], 'readwrite');
+    if ((await tx.objectStore('inquiries').count()) > 0) return abortWith(tx, '既に問い合わせが登録されているため、デモデータは追加しません');
+    const [employees, cats, depts] = await Promise.all([
+      tx.objectStore('employees').getAll(),
+      tx.objectStore('inquiryCategories').getAll(),
+      tx.objectStore('departments').getAllKeys(),
+    ]);
+    if (employees.length === 0) return abortWith(tx, '社員が登録されていないため、デモの問い合わせを作成できません');
+    const demo = createHelpdeskDemoData(this.today(), employees, cats.length ? cats : createDefaultInquiryCategories(), depts);
+    if (!cats.length) for (const c of createDefaultInquiryCategories()) await tx.objectStore('inquiryCategories').put(c);
+    const existingFaqIds = new Set(await tx.objectStore('faqs').getAllKeys());
+    for (const f of demo.faqs) if (!existingFaqIds.has(f.id)) await tx.objectStore('faqs').put(f);
+    for (const i of demo.inquiries) await tx.objectStore('inquiries').put(i);
+    for (const t of demo.tasks) await tx.objectStore('tasks').put(t);
+    await logActivity(tx, 'data', 'demo', `ヘルプデスクのデモデータ（問い合わせ${demo.inquiries.length}件・FAQ${demo.faqs.length}件）を追加しました`);
+    await tx.done;
+    return demo.inquiries.length;
   }
 
   async recordExport(message: string): Promise<void> {
     const tx = this.db.transaction(['activities'], 'readwrite');
-    await this.log(tx, 'data', 'export', message);
+    await logActivity(tx, 'data', 'export', message);
     await tx.done;
   }
 }

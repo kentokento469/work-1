@@ -108,8 +108,8 @@ describe('WorkCoreService: 業務シナリオ', () => {
     await service.ensureInitialized();
     const emp = await service.createEmployee(newHire());
     await service.applyOnboarding(emp.id, {});
-    const { deletedTasks } = await service.deleteEmployee(emp.id);
-    expect(deletedTasks).toBe(9);
+    const deleted = await service.deleteEmployee(emp.id);
+    expect(deleted.tasks).toHaveLength(9);
     const snap = await service.loadSnapshot();
     expect(snap.tasks.some((t) => t.employeeId === emp.id)).toBe(false);
   });

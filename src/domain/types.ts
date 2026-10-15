@@ -61,7 +61,7 @@ export const PRIORITY_LABEL: Record<Priority, string> = {
 
 export const PRIORITY_WEIGHT: Record<Priority, number> = { high: 3, medium: 2, low: 1 };
 
-export type TaskSource = 'manual' | 'onboarding';
+export type TaskSource = 'manual' | 'onboarding' | 'inquiry';
 
 export interface Task {
   id: string;
@@ -77,6 +77,8 @@ export interface Task {
   source: TaskSource;
   /** 自動生成元ルール。重複生成防止キーに使用 */
   ruleId: string | null;
+  /** 生成元の問い合わせ (Phase 2)。Phase 1 のデータはマイグレーションで null になる */
+  inquiryId: string | null;
   createdAt: ISODateTime;
   updatedAt: ISODateTime;
   completedAt: ISODateTime | null;
@@ -104,7 +106,7 @@ export interface OnboardingRule {
   updatedAt: ISODateTime;
 }
 
-export type ActivityCategory = 'employee' | 'task' | 'onboarding' | 'rule' | 'department' | 'data';
+export type ActivityCategory = 'employee' | 'task' | 'onboarding' | 'rule' | 'department' | 'data' | 'inquiry' | 'faq' | 'category';
 
 export interface ActivityLog {
   id: string;
@@ -115,6 +117,100 @@ export interface ActivityLog {
   entityId: string | null;
 }
 
+// ===================== Phase 2: ヘルプデスク =====================
+
+export const INQUIRY_STATUSES = ['new', 'in_progress', 'waiting', 'on_hold', 'resolved', 'closed'] as const;
+export type InquiryStatus = (typeof INQUIRY_STATUSES)[number];
+
+export const INQUIRY_STATUS_LABEL: Record<InquiryStatus, string> = {
+  new: '新規',
+  in_progress: '対応中',
+  waiting: '回答待ち',
+  on_hold: '保留',
+  resolved: '解決済み',
+  closed: '完了',
+};
+
+/** 「未解決」= まだ担当側で作業が残っている状態 */
+export const OPEN_INQUIRY_STATUSES: readonly InquiryStatus[] = ['new', 'in_progress', 'waiting', 'on_hold'];
+
+export interface InquiryCategory {
+  id: string;
+  name: string;
+  /** 自動分類に使うキーワード (管理者が編集可能) */
+  keywords: string[];
+  /** 既定の担当部署・担当者 (自動入力の初期値) */
+  defaultDepartmentId: string | null;
+  defaultAssignee: string;
+  /** 既定の対応期限 (受付日からの営業日数) */
+  slaBusinessDays: number;
+  enabled: boolean;
+  order: number;
+  /** 「その他・要確認」の受け皿カテゴリ。削除不可 */
+  isFallback: boolean;
+}
+
+export type InquiryEventType = 'created' | 'comment' | 'status' | 'update' | 'task' | 'faq' | 'classification';
+
+export interface InquiryEvent {
+  id: string;
+  at: ISODateTime;
+  type: InquiryEventType;
+  message: string;
+}
+
+/** 受付時点の自動分類結果 (監査・精度検証のため保存する) */
+export interface ClassificationSnapshot {
+  suggestedCategoryId: string;
+  suggestedPriority: Priority;
+  needsReview: boolean;
+  /** 担当者が候補をそのまま採用したか */
+  categoryAccepted: boolean;
+  priorityAccepted: boolean;
+  reasons: string[];
+}
+
+export interface Inquiry {
+  id: string;
+  /** 問い合わせ番号 (例: HD-2026-0001) */
+  number: string;
+  receivedAt: ISODateTime;
+  requesterId: string | null;
+  /** 社員削除後も履歴が読めるよう受付時点の氏名・部署を保持する */
+  requesterName: string;
+  requesterDepartmentId: string | null;
+  title: string;
+  body: string;
+  categoryId: string;
+  priority: Priority;
+  assignee: string;
+  dueDate: ISODate;
+  status: InquiryStatus;
+  resolution: string;
+  resolvedAt: ISODateTime | null;
+  closedAt: ISODateTime | null;
+  classification: ClassificationSnapshot | null;
+  /** 関連付けたFAQ */
+  faqIds: string[];
+  history: InquiryEvent[];
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
+}
+
+export interface Faq {
+  id: string;
+  question: string;
+  /** 確定した解決手順 */
+  answer: string;
+  categoryId: string;
+  keywords: string[];
+  enabled: boolean;
+  /** 解決済み問い合わせからFAQ化した場合の元案件 */
+  sourceInquiryId: string | null;
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
+}
+
 /** バックアップ・復元対象となるデータ全体 */
 export interface DataSnapshot {
   departments: Department[];
@@ -122,4 +218,7 @@ export interface DataSnapshot {
   tasks: Task[];
   rules: OnboardingRule[];
   activities: ActivityLog[];
+  inquiries: Inquiry[];
+  faqs: Faq[];
+  inquiryCategories: InquiryCategory[];
 }

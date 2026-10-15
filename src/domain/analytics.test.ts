@@ -25,7 +25,7 @@ describe('computeDashboard', () => {
   });
 
   it('タスク0件でも完了率は0%', () => {
-    const s = computeDashboard({ departments: [], employees: [], tasks: [], rules: [], activities: [] }, TODAY);
+    const s = computeDashboard({ departments: [], employees: [], tasks: [], rules: [], activities: [], inquiries: [], faqs: [], inquiryCategories: [] }, TODAY);
     expect(s.completionRate).toBe(0);
   });
 });

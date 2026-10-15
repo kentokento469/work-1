@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { ArrowLeft, ClipboardList, Pencil, Plus, Trash2, UserX, Zap } from 'lucide-react';
+import { ArrowLeft, ClipboardList, Headset, Pencil, Plus, Trash2, UserX, Zap } from 'lucide-react';
+import { InquiryStatusBadge } from '../features/helpdesk/parts';
 import { useAppData } from '../app/AppData';
 import { navigate } from '../app/router';
 import { daysUntilHire } from '../automation/onboardingEngine';
@@ -35,6 +36,7 @@ export function EmployeeDetailPage({ employeeId }: { employeeId: string }) {
   const tasks = data.tasks
     .filter((t) => t.employeeId === emp.id)
     .sort((a, b) => (a.status === 'done' ? 1 : 0) - (b.status === 'done' ? 1 : 0) || a.dueDate.localeCompare(b.dueDate));
+  const inquiries = data.inquiries.filter((i) => i.requesterId === emp.id);
   const done = tasks.filter((t) => t.status === 'done').length;
   const pct = tasks.length ? Math.round((done / tasks.length) * 100) : 0;
   const dept = deptById.get(emp.departmentId);
@@ -130,6 +132,36 @@ export function EmployeeDetailPage({ employeeId }: { employeeId: string }) {
         </div>
       </Card>
 
+      <Card className="mt-4 overflow-hidden">
+        <CardHeader
+          title="この社員からの問い合わせ"
+          icon={Headset}
+          description={`${inquiries.length}件`}
+          action={
+            emp.status !== 'retired' && (
+              <Button size="sm" variant="secondary" icon={Plus} onClick={() => navigate(`/helpdesk/new?requester=${emp.id}`)}>
+                登録
+              </Button>
+            )
+          }
+        />
+        {inquiries.length === 0 ? (
+          <p className="px-5 pb-4 pt-2 text-sm text-slate-500">問い合わせはありません。</p>
+        ) : (
+          <ul className="mt-2 divide-y divide-slate-100 border-t border-slate-100 dark:divide-navy-800 dark:border-navy-800">
+            {inquiries.map((i) => (
+              <li key={i.id}>
+                <a href={`#/helpdesk/${i.id}`} className="flex min-h-12 items-center gap-2 px-4 py-2 hover:bg-slate-50 sm:px-5 dark:hover:bg-navy-800/60">
+                  <span className="font-mono text-[11px] text-slate-400">{i.number}</span>
+                  <span className="min-w-0 flex-1 truncate text-sm">{i.title}</span>
+                  <InquiryStatusBadge status={i.status} />
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+
       <EmployeeFormModal open={editOpen} onClose={() => setEditOpen(false)} employee={emp} />
       <TaskFormModal open={taskCreating} onClose={() => setTaskCreating(false)} defaultEmployeeId={emp.id} />
       <TaskFormModal open={!!taskEditing} onClose={() => setTaskEditing(null)} task={taskEditing ?? undefined} />
@@ -144,11 +176,12 @@ export function EmployeeDetailPage({ employeeId }: { employeeId: string }) {
               「{emp.name}（{emp.employeeNumber}）」を削除します。
             </p>
             {tasks.length > 0 && <p className="mt-2 font-semibold text-red-600 dark:text-red-400">関連するタスク {tasks.length}件も同時に削除されます。</p>}
-            <p className="mt-2 text-xs">退職の場合は削除せず、ステータスを「退職」に変更することをおすすめします。この操作は取り消せません。</p>
+            {inquiries.length > 0 && <p className="mt-2">問い合わせ {inquiries.length}件は履歴として残ります（受付時の氏名で表示）。</p>}
+            <p className="mt-2 text-xs">退職の場合は削除せず、ステータスを「退職」に変更することをおすすめします。削除直後の通知から元に戻せます。</p>
           </>
         }
         onConfirm={async () => {
-          await run((s) => s.deleteEmployee(emp.id), `${emp.name}さんを削除しました`);
+          await run((s) => s.deleteEmployee(emp.id), `${emp.name}さんを削除しました`, { undo: (d) => (s) => s.restoreEmployee(d) });
           navigate('/employees');
         }}
         onClose={() => setDeleteOpen(false)}
