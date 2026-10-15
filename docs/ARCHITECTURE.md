@@ -314,3 +314,42 @@ interface AutomationProposal {
 - **DB v3 → v4**：`documents`・`documentFiles` ストアを作成するだけ。既存データには触れない
 - **バックアップ v4**：`data.documents` は常に含め、元ファイルは任意で `files`（Base64）に含める。復元前に `decodeBackupFiles()` がサイズと SHA-256 を検証し、1件でも一致しなければ復元しない。元ファイルを含まない書類は抽出結果だけ復元し、画面で「元ファイルがこの端末にありません」と表示
 - **Phase 5 への拡張点**：`DocumentRecord` の確定（`status: 'confirmed'`）を自動化エンジン（`AutomationDefinition.detect`）の入力にできる。例：確認済みの納品書で在庫未反映のものを「在庫反映の提案」として出す、請求書の支払期限から支払タスクを提案する
+
+## 19. Phase 5：自動化ルールの一元管理（`automation/registry.ts`・`settings.ts`）
+
+- `ALL_AUTOMATIONS = [...WORKFLOW_AUTOMATIONS, ...INVENTORY_AUTOMATIONS]`。定義に `category`（社員・在庫など）と `autoCapable`（自動実行を選べるか）を追加。ルールを足すと、自動化センターの一覧・有効/無効・実行方法・処理履歴・二重実行防止がそのまま使える
+- 追加ルール：`onboarding-tasks`（入社準備タスク。Phase 1 の `buildOnboardingPlan` と同じ判定で、`ruleId` 単位で重複しない）、`retirement-procedures`（退職日45日以内：アカウント停止の確認・書類回収・社員証回収のタスク。**アカウントの停止・削除は実行しない**）
+- ルールの設定は `settings` ストア（v5 で追加、`{id:'automation', value:{[ruleId]:{enabled, mode}}}`）。`mode:'auto'` は `autoCapable` かつ全操作が `requiresApproval:false` のときだけ有効（サービス層でも再検査し、在庫を動かすルールの自動実行は拒否）
+- 自動実行（`WorkCoreService.runAutoAutomations`）：起動時とデータ更新のたびに `AppData` が呼ぶ。実行中に再度呼ばれたら終わってからもう1回だけ（`running/again`）。実行は `applyProposal(..., {auto:true})` と同じ経路で、処理履歴に `status:'auto'` を記録し、同じ key は二度と実行しない
+- データ初期化（`clearBusinessData`）でも設定は残す
+
+## 20. AI 連携の設計（`ai/assist.ts`）
+
+```ts
+interface AssistProvider {
+  id; kind: 'rule' | 'model'; label;
+  sendsData: boolean;               // 外部へ送信するか（画面に表示）
+  classifyInquiry(text): ...;        // 問い合わせの分類
+  summarizeStatus(data, today): ...; // 今日の要点
+}
+```
+現在は `ruleBasedProvider`（kind:'rule'、ラベル「ルールベース（AIではありません）」、sendsData:false）のみ。AI の出力は提案として扱い、確定データには利用者の操作を経て保存する（自動化提案・書類の抽出と同じ）。実モデルを足す場合は、利用者の許可・設定・送信内容の表示を条件に `currentProvider()` を切り替える。
+
+## 21. スマート入力（`domain/input/`・`ui/SmartInputs.tsx`）
+
+| 部品 | 処理 | 適用先 |
+| --- | --- | --- |
+| `PhoneField` | 入力中は全角→半角のみ（カーソルが動かない）。欄を離れた時・貼り付け時に `formatPhone`（libphonenumber-js を遅延読み込み、種類は番号の先頭から判定）。保存時にも `finalizePhone` で同じ整形。変換中（composition）は値を変えない | 社員・仕入先 |
+| `PostalAddressFields` | 7桁で `lookupPostal`（`vendor/postal/先頭3桁.json`、取得結果はメモリにキャッシュ、失敗は再試行可）。複数候補は選択、手で直した欄は上書きせず候補を提示 | 社員 |
+| `EmailField` | 欄を離れた時に全角→半角・ドメインを小文字化、形式の誤りもこの時だけ表示 | 社員・仕入先 |
+| `AmountField` | 入力中の文字は内部に保持し、数字として読める時だけ値を更新。欄を離れると3桁区切り | 品目の参考単価 |
+| `SuggestField` | 既存データの値を `datalist` の候補に | 役職・メーカー・単位・書類の発行元/宛先 |
+
+郵便番号データは `scripts/build-postal-data.mjs` が npm パッケージ jp-postal（KEN_ALL）からビルド時に生成する（`predev`/`prebuild`）。
+
+## 22. 戻る操作（`app/router.ts`・`app/BackLink.tsx`・`app/swipeBack.ts`）
+
+- **履歴の位置**：ハッシュ遷移ごとに積まれる履歴に通し番号（`history.state.wcIdx`）を記録し、番号 → 画面のパスを sessionStorage に保存。`canGoBack()`（アプリ内に戻れる履歴があるか）・`previousPath()` を提供
+- **戻るリンク**（`BackLink`）：直前の履歴が戻り先の画面なら `history.back()`、そうでなければ通常の移動。ブラウザの戻る・スワイプと同じ結果になり、一覧の条件（URL のクエリ）とスクロール位置（画面ごとに記録）が残る
+- **モーダル**：開くと `pushState({wcIdx, wcModal})`。戻る操作（popstate）で上のモーダルから閉じ、未保存の変更があれば履歴を積み直して破棄確認を出す。画面の操作で閉じたときはアプリ自身が `history.back()` で履歴を取り除く。その完了前の移動は、完了後にやり直す（Chromium は戻る処理で直前の移動を取り消すため）。保存後の画面移動（`navigate`）はモーダルの履歴を置き換える。閉じたモーダルの履歴に戻った場合は1つ飛ばす
+- **スワイプ**：ホーム画面から起動した単独表示（`display-mode: standalone` / `navigator.standalone`）のときだけ有効。左端 24px から始まり、横方向に固定されてから縦スクロールを止める。画面幅の30%以上か速いスワイプで `history.back()`（`canGoBack()` が false なら戻らない）。入力欄・`[data-no-swipe]`・横スクロール中の要素の上では反応しない。戻る処理中は次のスワイプを受け付けない。Safari のタブでは標準のスワイプに任せる（二重に戻らない）
