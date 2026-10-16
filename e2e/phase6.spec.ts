@@ -150,6 +150,8 @@ test('[Phase6] B. 全通知から元データへ到達・件数の一致・既�
     await row.locator('a').click();
     if (type === 'task_overdue') await expect(page.locator(`[data-focus-id="${id.split(':')[1]}"]`).first()).toBeInViewport();
     else if (type === 'automation_proposal') await expect(page.locator(`[data-focus-id="${id.slice(id.indexOf(':') + 1)}"]`)).toBeInViewport();
+    // Phase 6.1 から在庫不足は「次の操作」の画面 (発注候補・下書きの発注書・品目) へ移動する
+    else if (type === 'stock_shortage') await expect(page.locator('[data-focus-id^="sug:"].wc-focus, [data-testid="po-submit"], [data-testid="target-notice"][data-notice-type="stock_shortage"]').first()).toBeVisible();
     else await expect(page.getByTestId('target-notice').filter({ has: page.locator(`[data-notice-type="${type}"]`) }).or(page.locator(`[data-testid="target-notice"][data-notice-type="${type}"]`)).first()).toBeVisible();
   }
 

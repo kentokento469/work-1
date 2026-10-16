@@ -185,8 +185,8 @@ UI層 (React + Tailwind)        pages/ features/ ui/   … 表示と入力のみ
 | --- | --- |
 | TypeScript 型チェック | ✅ エラー 0 |
 | 本番ビルド | ✅ 初回 JS gzip 156KB＋画面ごとの分割チャンク（PDF.js・OCR・電話番号ライブラリは必要時のみ読み込み） |
-| 単体・結合テスト（Vitest） | ✅ 181 / 181（Phase 1〜4・ダッシュボード改善: 146、Phase 5: 28、Phase 6: 7） |
-| E2E（Playwright, iPhone 13 相当 + デスクトップ） | ✅ 49 / 49（Phase 6 の検証 A〜D、Phase 5 の検証項目1〜15を含む） |
+| 単体・結合テスト（Vitest） | ✅ 184 / 184（Phase 1〜4・ダッシュボード改善: 146、Phase 5: 28、Phase 6〜6.1: 10） |
+| E2E（Playwright, iPhone 13 相当 + デスクトップ） | ✅ 57 / 57（Phase 6.1 の通知の約束、Phase 6 の検証 A〜D、Phase 5 の検証項目1〜15を含む） |
 | 実ブラウザでの DB マイグレーション（Phase 1→2、2→3、3→4、4→5） | ✅ 合格（手順は e2e/migration.spec.ts 冒頭） |
 | 依存パッケージ脆弱性（npm audit） | ✅ 0件 |
 | **実機 iPhone Safari** | ⚠️ **未検証**（Chromium による iPhone 13 エミュレーションのみ。標準のスワイプ戻り・単独起動・日本語キーボード・カメラ・HEIC・共有シート・実機での OCR 速度も未検証） |
