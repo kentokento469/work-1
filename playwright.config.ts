@@ -8,11 +8,17 @@ export default defineConfig({
   use: {
     baseURL: 'http://localhost:4173/',
     acceptDownloads: true,
+    // 日付の扱い (今日・期限) を利用環境と同じ日本時間で検証する
+    timezoneId: 'Asia/Tokyo',
+    locale: 'ja-JP',
     launchOptions: { executablePath: process.env.CHROMIUM_PATH || undefined },
   },
   projects: [
     { name: 'iphone', use: { ...devices['iPhone 13'], browserName: 'chromium' } },
     { name: 'desktop', use: { ...devices['Desktop Chrome'] } },
+    // WebKit (Safari のエンジン) での検証。CI でだけ有効にする (PW_WEBKIT=1)。
+    // 注意: Playwright の WebKit は実機 iPhone Safari と同一ではない (実機の検証は別途必要)
+    ...(process.env.PW_WEBKIT ? [{ name: 'webkit-iphone', use: { ...devices['iPhone 13'] } }] : []),
   ],
   webServer: {
     command: 'npm run build && npx vite preview --port 4173 --strictPort',

@@ -16,7 +16,7 @@ import { emptyInventory } from '../domain/inventory/defaults';
 import { InventoryService } from './inventoryService';
 import { createDemoData, createHelpdeskDemoData } from '../demo/demoData';
 import { createDefaultInquiryCategories } from '../domain/helpdesk/defaults';
-import { AppError, abortWith, fieldError, logActivity, type WriteTx } from './common';
+import { AppError, abortWith, fieldError, guardTx, logActivity, type WriteTx } from './common';
 import { HelpdeskService } from './helpdeskService';
 import { ALL_AUTOMATIONS } from '../automation/registry';
 import { pendingProposals } from '../automation/engine';
@@ -154,7 +154,11 @@ export class WorkCoreService {
     const reserving = reservations.filter((r) => r.status === 'active' || r.status === 'backorder').length;
     if (holding + reserving > 0)
       return abortWith(tx, `貸与中・予約中の機器があるため削除できません（資産${holding}台・予約${reserving}件）。返却または予約解除をしてから削除するか、ステータスを「退職」にしてください`);
-    const tasks = await tx.objectStore('tasks').index('byEmployee').getAll(id);
+    const own = await tx.objectStore('tasks').index('byEmployee').getAll(id);
+    // 削除するタスクのサブタスク (別の社員・社員なし) も一緒に削除する (親を失ったサブタスクを残さない)。元に戻すと一緒に戻る
+    const ownIds = new Set(own.map((t) => t.id));
+    const subs = (await tx.objectStore('tasks').getAll()).filter((t) => t.parentTaskId && ownIds.has(t.parentTaskId) && !ownIds.has(t.id));
+    const tasks = [...own, ...subs];
     for (const t of tasks) await tx.objectStore('tasks').delete(t.id);
     // 書類は業務記録なので削除せず、社員との関連付けだけを外す
     const docs = (await tx.objectStore('documents').getAll()).filter((d) => d.employeeId === id);
@@ -352,16 +356,18 @@ export class WorkCoreService {
 
   private async replaceAll(data: DataSnapshot, message: string, files: DocumentFile[] = []): Promise<void> {
     const tx = this.db.transaction([...STORE_NAMES], 'readwrite');
-    // 二重送信防止キー (meta の req:*) も含めて全消去する
-    await Promise.all(STORE_NAMES.map((s) => tx.objectStore(s).clear()));
-    for (const name of DATA_STORES) {
-      const store = tx.objectStore(name);
-      for (const rec of data[name] as { id: string }[]) await store.put(rec as never);
-    }
-    for (const f of files) await tx.objectStore('documentFiles').put(f);
-    await tx.objectStore('meta').put({ key: 'initialized', value: nowISO() });
-    await logActivity(tx, 'data', 'replace', message);
-    await tx.done;
+    // 全消去と書き込みを1つのトランザクションで行い、途中で失敗したら全体を取り消す (現在のデータを残す)
+    await guardTx(tx, async () => {
+      // 二重送信防止キー (meta の req:*) も含めて全消去する
+      await Promise.all(STORE_NAMES.map((s) => tx.objectStore(s).clear()));
+      for (const name of DATA_STORES) {
+        const store = tx.objectStore(name);
+        for (const rec of data[name] as { id: string }[]) await store.put(rec as never);
+      }
+      for (const f of files) await tx.objectStore('documentFiles').put(f);
+      await tx.objectStore('meta').put({ key: 'initialized', value: nowISO() });
+      await logActivity(tx, 'data', 'replace', message);
+    });
   }
 
   /**

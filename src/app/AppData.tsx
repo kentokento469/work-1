@@ -56,7 +56,7 @@ const Ctx = createContext<AppDataValue | null>(null);
 let bootPromise: Promise<{ service: WorkCoreService; seeded: boolean }> | null = null;
 function boot() {
   bootPromise ??= (async () => {
-    if (!('indexedDB' in window)) throw new Error('このブラウザは IndexedDB に対応していません');
+    if (!window.indexedDB) throw new StorageUnavailableError();
     const db = await openWorkCoreDB();
     const service = new WorkCoreService(db);
     const seeded = await service.ensureInitialized();
@@ -65,7 +65,27 @@ function boot() {
   return bootPromise;
 }
 
-type LoadState = { status: 'loading' } | { status: 'error'; message: string } | { status: 'ready'; service: WorkCoreService; data: DataSnapshot };
+class StorageUnavailableError extends Error {
+  constructor() {
+    super('IndexedDB is not available');
+    this.name = 'StorageUnavailableError';
+  }
+}
+
+/** 起動時のエラーを、利用者向けの説明と開発者向けの詳細に分ける */
+export function describeStartupError(e: unknown): { title: string; message: string; detail: string } {
+  const name = e instanceof Error ? e.name : '';
+  const detail = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+  if (name === 'StorageUnavailableError' || name === 'InvalidStateError' || name === 'SecurityError')
+    return { title: 'データベースを開けませんでした', message: 'このブラウザでは、データ（IndexedDB）を保存できない設定になっています。プライベートブラウズを終了するか、サイトデータの保存を許可してから再読み込みしてください。', detail };
+  if (name === 'VersionError')
+    return { title: 'データベースを開けませんでした', message: 'この端末には、より新しい版の WorkCore で保存したデータがあります。古い画面が残っている可能性があるため、再読み込みして最新の版で開いてください（データは消えていません）。', detail };
+  if (name === 'QuotaExceededError')
+    return { title: 'データベースを開けませんでした', message: '端末の保存容量が不足しています。不要なファイルやアプリを削除して空き容量を確保してから、再読み込みしてください。', detail };
+  return { title: 'データベースを開けませんでした', message: 'データの読み込み中に問題が発生しました。再読み込みしても解決しない場合は、ブラウザを再起動してください（データの削除は行っていません）。', detail };
+}
+
+type LoadState = { status: 'loading' } | { status: 'error'; title: string; message: string; detail: string } | { status: 'ready'; service: WorkCoreService; data: DataSnapshot };
 
 export function AppDataProvider({ children }: { children: ReactNode }) {
   const toast = useToast();
@@ -108,14 +128,10 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         if (seeded) toast.info('デモデータを読み込みました。自由に操作してお試しください。');
         void runAuto(service);
       } catch (e) {
-        if (!cancelled)
-          setState({
-            status: 'error',
-            message:
-              e instanceof Error
-                ? `${e.message}（プライベートブラウズ等でデータ保存が制限されている可能性があります）`
-                : 'データベースを開けませんでした',
-          });
+        if (!cancelled) {
+          console.error('[WorkCore] 起動に失敗', e);
+          setState({ status: 'error', ...describeStartupError(e) });
+        }
       }
     })();
     return () => {
@@ -236,6 +252,20 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     };
   }, [state, run, reload, markNoticesReadCb]);
 
+  // 日付をまたいだら「今日」(期限超過・今日のタスク・通知) を計算し直す。開いたままの端末でも翌朝に正しく表示する
+  useEffect(() => {
+    if (!service) return;
+    let day = service.today();
+    const t = window.setInterval(() => {
+      const now = service.today();
+      if (now !== day) {
+        day = now;
+        void reload();
+      }
+    }, 60_000);
+    return () => window.clearInterval(t);
+  }, [service, reload]);
+
   const currentNotices = value?.notices;
   useEffect(() => {
     if (currentNotices) void syncNotices(currentNotices);
@@ -254,8 +284,12 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     return (
       <div className="flex min-h-dvh items-center justify-center p-6">
         <div className="max-w-md rounded-2xl border border-red-200 bg-white p-6 text-center dark:border-red-900 dark:bg-navy-900" role="alert">
-          <h1 className="text-lg font-bold">データベースを開けませんでした</h1>
+          <h1 className="text-lg font-bold">{state.title}</h1>
           <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">{state.message}</p>
+          <details className="mt-3 text-left text-xs text-slate-500">
+            <summary className="cursor-pointer">開発者向けの情報</summary>
+            <pre className="mt-1 whitespace-pre-wrap break-all">{state.detail}</pre>
+          </details>
           <button className="mt-4 rounded-lg bg-navy-800 px-4 py-2.5 text-sm font-semibold text-white" onClick={() => window.location.reload()}>
             再読み込み
           </button>

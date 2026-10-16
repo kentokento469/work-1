@@ -58,7 +58,7 @@ export function DataPage() {
   const { data, run, service } = useAppData();
   const toast = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
-  const [restoreCandidate, setRestoreCandidate] = useState<{ backup: BackupFile; counts: Record<keyof DataSnapshot, number>; fileName: string; files: DocumentFile[]; missingFiles: number } | null>(null);
+  const [restoreCandidate, setRestoreCandidate] = useState<{ backup: BackupFile; counts: Record<keyof DataSnapshot, number>; fileName: string; files: DocumentFile[]; missingFiles: number; repairs: string[] } | null>(null);
   const [includeFiles, setIncludeFiles] = useState(true);
   const [fileBytes, setFileBytes] = useState<number | null>(null);
   useEffect(() => {
@@ -82,7 +82,13 @@ export function DataPage() {
     else {
       // 元ファイルは Base64 で埋め込む (サイズが約1.33倍になる)。含めない場合は抽出結果だけを保存
       const files = includeFiles ? await service.loadAllDocumentFiles() : undefined;
-      downloadText(`workcore_backup_${ts}.json`, JSON.stringify(createBackup(data, new Date(), files), null, files?.length ? 0 : 2), 'application/json');
+      const backup = createBackup(data, new Date(), files);
+      const text = JSON.stringify(backup, null, files?.length ? 0 : 2);
+      // 作成したバックアップを、復元時と同じ検査にかける (復元できないバックアップを気付かずに保存しない)
+      const check = parseBackupText(text);
+      downloadText(`workcore_backup_${ts}.json`, text, 'application/json');
+      if (!check.ok) toast.error(`このバックアップはそのままでは復元できない状態です：${check.errors[0] ?? ''}（データ管理の操作履歴とあわせて確認してください）`);
+      else if (check.repairs.length) toast.info(`バックアップを作成しました。削除済みデータへの関連付けが残っていたため、復元時に解除されます（${check.repairs.length}種類）`);
     }
     const label =
       kind === 'employees'
@@ -127,7 +133,7 @@ export function DataPage() {
       }
       const included = new Set(decoded.files.map((f) => f.id));
       const missingFiles = r.backup.data.documents.filter((d) => d.file && !included.has(d.file.fileId)).length;
-      setRestoreCandidate({ backup: r.backup, counts: r.counts, fileName: file.name, files: decoded.files, missingFiles });
+      setRestoreCandidate({ backup: r.backup, counts: r.counts, fileName: file.name, files: decoded.files, missingFiles, repairs: r.repairs });
     } catch {
       setRestoreErrors(['ファイルを読み込めませんでした']);
     } finally {
@@ -330,6 +336,16 @@ export function DataPage() {
                 書類の元ファイル：{restoreCandidate.files.length}件（内容のハッシュを検証済み）
                 {restoreCandidate.missingFiles > 0 && <span className="text-amber-700 dark:text-amber-400">。元ファイルを含まない書類 {restoreCandidate.missingFiles}件は、抽出結果だけが復元されます</span>}
               </p>
+              {restoreCandidate.repairs.length > 0 && (
+                <div className="mt-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-100" data-testid="restore-repairs">
+                  <p className="font-semibold">削除済みのデータを指していた関連付けを、次のとおり解除して復元します（業務データは消えません）</p>
+                  <ul className="mt-1 list-disc pl-4">
+                    {restoreCandidate.repairs.map((r) => (
+                      <li key={r}>{r}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <p className="mt-2 text-xs">必要に応じて、先に現在のデータをバックアップしてください。</p>
             </>
           )

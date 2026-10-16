@@ -243,11 +243,14 @@ describe('バックアップ互換性', () => {
     expect((await service.loadSnapshot()).employees).toHaveLength(p1.employees.length);
   });
 
-  it('存在しない問い合わせを参照するタスクがあれば拒否', () => {
+  it('存在しない問い合わせを参照するタスクは、関連付けを解除して取り込む（Phase 8: 任意の参照は修復）', () => {
     const p = createDemoData(TODAY);
-    const broken = { ...p, inquiries: [] };
+    const broken = { ...p, inquiries: [], documents: [] };
     const r = parseBackupText(JSON.stringify(createBackup(broken)));
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.errors.join()).toContain('生成元問い合わせが存在しません');
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.repairs.join()).toContain('問い合わせを指していたタスクの関連付けを解除');
+      expect(r.backup.data.tasks.every((t) => t.inquiryId === null)).toBe(true);
+    }
   });
 });

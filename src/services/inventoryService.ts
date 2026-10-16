@@ -216,6 +216,10 @@ export class InventoryService {
         return 'deactivated';
       }
       await tx.objectStore('items').delete(id);
+      // 削除した品目を指す発注候補・書類の明細の品目を残さない
+      for (const sg of await tx.objectStore('purchaseSuggestions').index('byItem').getAll(id)) await tx.objectStore('purchaseSuggestions').delete(sg.id);
+      for (const d of await tx.objectStore('documents').getAll())
+        if (d.lines.some((l) => l.itemId === id)) await tx.objectStore('documents').put({ ...d, lines: d.lines.map((l) => (l.itemId === id ? { ...l, itemId: null } : l)) });
       await logActivity(tx, 'inventory', 'delete', `品目「${item.name}」を削除しました（履歴なし）`, id);
       return 'deleted';
     });

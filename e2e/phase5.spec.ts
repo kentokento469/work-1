@@ -5,10 +5,10 @@
  * 注意: スワイプは Chromium に CDP でタッチ操作を送って検証している。
  * iOS Safari 標準のスワイプ戻り・ホーム画面から起動した単独表示モードは実機で未検証。
  */
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page, testNow } from './fixtures';
 
 function isoAfter(days: number): string {
-  const d = new Date();
+  const d = testNow();
   d.setDate(d.getDate() + days);
   while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
   const p = (n: number) => String(n).padStart(2, '0');
@@ -67,7 +67,7 @@ async function swipe(page: Page, from: { x: number; y: number }, to: { x: number
   await cdp.detach();
 }
 
-test('[Phase5] 電話番号の自動整形（携帯・固定の市外局番桁数・050・0120・全角・貼り付け・IME）とメール', async ({ page }) => {
+test('[Phase5] 電話番号の自動整形（携帯・固定の市外局番桁数・050・0120・全角・貼り付け・IME）とメール', async ({ page, browserName }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto('/');
@@ -117,16 +117,18 @@ test('[Phase5] 電話番号の自動整形（携帯・固定の市外局番桁�
   });
   await expect(phone).toHaveValue('03-1234-5678');
 
-  // 6. IME (日本語入力の変換中) は値を書き換えない。確定・欄を離れた後に整形する
-  await phone.fill('');
-  await phone.focus();
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send('Input.imeSetComposition', { text: '０９０', selectionStart: 3, selectionEnd: 3 });
-  await expect(phone).toHaveValue('０９０');
-  await cdp.send('Input.insertText', { text: '０９０１２３４５６７８' });
-  await cdp.detach();
-  await phone.blur();
-  await expect(phone).toHaveValue('090-1234-5678');
+  // 6. IME (日本語入力の変換中) は値を書き換えない。確定・欄を離れた後に整形する (CDP を使うため Chromium のみ)
+  if (browserName === 'chromium') {
+    await phone.fill('');
+    await phone.focus();
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Input.imeSetComposition', { text: '０９０', selectionStart: 3, selectionEnd: 3 });
+    await expect(phone).toHaveValue('０９０');
+    await cdp.send('Input.insertText', { text: '０９０１２３４５６７８' });
+    await cdp.detach();
+    await phone.blur();
+    await expect(phone).toHaveValue('090-1234-5678');
+  }
 
   // メール: 全角・大文字ドメインを正規化。誤りは欄を離れた時だけ表示 (入力中にエラーを出し続けない)
   const email = dialog.getByTestId('employee-email');
@@ -301,8 +303,9 @@ test('[Phase5] 戻る操作：一覧の検索条件・スクロール位置・�
   expect(errors).toEqual([]);
 });
 
-test('[Phase5] 画面左端からのスワイプで戻る（単独起動モード）・アプリ外へ出ない・モーダル／横スクロールと競合しない', async ({ page, isMobile }) => {
+test('[Phase5] 画面左端からのスワイプで戻る（単独起動モード）・アプリ外へ出ない・モーダル／横スクロールと競合しない', async ({ page, isMobile, browserName }) => {
   test.skip(!isMobile, 'タッチ操作のある iPhone 相当の環境で検証');
+  test.skip(browserName !== 'chromium', 'CDP でタッチ操作を送るため Chromium のみ');
   await page.addInitScript(() => {
     (window as Window & { __wcForceSwipeBack?: boolean }).__wcForceSwipeBack = true;
     // 単独起動 (ホーム画面から起動) にはブラウザ標準のスワイプ戻りが無い。
@@ -371,8 +374,9 @@ test('[Phase5] 画面左端からのスワイプで戻る（単独起動モー�
   expect(page.url()).toBe(before);
 });
 
-test('[Phase5] 単独起動でない（ブラウザのタブ）ときは標準のスワイプに任せ、二重に戻らない', async ({ page, isMobile }) => {
+test('[Phase5] 単独起動でない（ブラウザのタブ）ときは標準のスワイプに任せ、二重に戻らない', async ({ page, isMobile, browserName }) => {
   test.skip(!isMobile, 'タッチ操作のある iPhone 相当の環境で検証');
+  test.skip(browserName !== 'chromium', 'CDP でタッチ操作を送るため Chromium のみ');
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'ダッシュボード' })).toBeVisible();
   await gotoHash(page, '#/tasks');

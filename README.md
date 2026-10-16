@@ -5,6 +5,7 @@
 > **Phase 2**：社内ヘルプデスク・問い合わせ自動分類・FAQ提案・タスク連携・分析、Phase 1 の UX 改善
 > **Phase 3**：在庫・備品・IT資産・購買管理、社員・ヘルプデスクとの連携、自動化エンジン（提案 → 承認 → 実行 → 履歴）
 > **Phase 4**：書類管理（請求書・領収書・納品書・見積書・申請書）、端末内OCR・PDF解析、確認・修正、重複検出、CSV出力
+> **Phase 8**：全体監査と品質保証基盤（削除後にバックアップが復元できない不具合・復元失敗時の部分書き込みを修正、エラー境界、日付変更への追従、CI に E2E を追加し失敗時は公開しない、E2E の日時固定）
 > **Phase 7**：汎用タスク管理（タスク名だけで登録・期限/部署は任意・プロジェクト・タグ・チェックリスト・サブタスク・繰り返し・ボード・カレンダー・依存関係）と全機能のタスク基盤への統合
 > **Phase 6.1**：すべての通知・警告から「通知が求める操作」を移動先で完了できるよう修正（入社準備の通知 → 対象社員の未完了タスク等）、通知の種類ごとの定義と検査を共通化
 > **Phase 6**：共通通知システム（通知センター・各画面の「要対応」・対象への直接移動と強調表示・未読と未処理の区別）、情報到達性の改善
@@ -200,8 +201,8 @@ UI層 (React + Tailwind)        pages/ features/ ui/   … 表示と入力のみ
 | --- | --- |
 | TypeScript 型チェック | ✅ エラー 0 |
 | 本番ビルド | ✅ 初回 JS gzip 173KB＋画面ごとの分割チャンク（PDF.js・OCR・電話番号ライブラリは必要時のみ読み込み） |
-| 単体・結合テスト（Vitest） | ✅ 202 / 202（Phase 1〜4・ダッシュボード改善: 146、Phase 5: 28、Phase 6〜6.1: 10、Phase 7: 18） |
-| E2E（Playwright, iPhone 13 相当 + デスクトップ） | ✅ 65 / 65（Phase 7 の検証項目1〜14、Phase 6.1 の通知の約束、Phase 6 の検証 A〜D、Phase 5 の検証項目1〜15を含む） |
+| 単体・結合テスト（Vitest） | ✅ 208 / 208（Phase 1〜4・ダッシュボード改善: 146、Phase 5: 28、Phase 6〜6.1: 10、Phase 7: 18、Phase 8: 6） |
+| E2E（Playwright, iPhone 13 相当 + デスクトップ） | ✅ 75 / 75（固定日時で実行。Phase 8 の異常系、Phase 7 の検証項目1〜14、Phase 6.1 の通知の約束、Phase 6 の検証 A〜D、Phase 5 の検証項目1〜15を含む） |
 | 実ブラウザでの DB マイグレーション（Phase 1→2、2→3、3→4、4→5、6→7） | ✅ 合格（手順は e2e/migration.spec.ts 冒頭） |
 | 依存パッケージ脆弱性（npm audit） | ✅ 0件 |
 | **実機 iPhone Safari** | ⚠️ **未検証**（Chromium による iPhone 13 エミュレーションのみ。標準のスワイプ戻り・単独起動・日本語キーボード・カメラ・HEIC・共有シート・実機での OCR 速度も未検証） |
@@ -221,7 +222,7 @@ npm run build        # 本番ビルド（dist/）
 npm run test:e2e     # E2E（Chromium のパスは CHROMIUM_PATH で指定可）
 ```
 
-`main` への push で GitHub Actions が型チェック・テスト・ビルド後に GitHub Pages へ公開します（Settings → Pages → Source を「GitHub Actions」に設定済み）。
+`main` への push で GitHub Actions が型チェック・単体テスト・`npm audit`・ビルド・E2E（iPhone 相当・デスクトップの Chromium）を行い、すべて成功した場合だけ GitHub Pages へ公開します（WebKit は参考として別ジョブで実行）（Settings → Pages → Source を「GitHub Actions」に設定済み）。
 
 既存ユーザーのデータは保持されます：初回起動時に IndexedDB が最新版（v5）へ自動移行し（在庫は空、保管場所・仕入先マスタのみ追加）、Phase 1・2 のバックアップ（schemaVersion 1・2）もそのまま復元できます。既存データに在庫のデモだけ追加したい場合は「データ管理 → 在庫のデモデータを追加」、ヘルプデスクのデモは「ヘルプデスクのデモデータだけ追加」を使います。
 
@@ -234,6 +235,7 @@ npm run test:e2e     # E2E（Chromium のパスは CHROMIUM_PATH で指定可）
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | システム構成・データモデル・マイグレーション・状態遷移 |
 | [docs/META_DESIGN.md](docs/META_DESIGN.md) | メタ理解設計：参考資料、抽出した原理、採用・不採用の理由、検証結果 |
 | [docs/UX_AUDIT.md](docs/UX_AUDIT.md) | UX 監査と改善（Phase 1〜3） |
+| [docs/PHASE8_RESULTS.md](docs/PHASE8_RESULTS.md) | Phase 8：全体監査・リスク一覧（P0〜P3）・テストマトリクス・品質基準・CI |
 | [docs/PHASE7_RESULTS.md](docs/PHASE7_RESULTS.md) | Phase 7：汎用タスク管理の調査・設計判断・検証項目1〜14・残課題 |
 | [docs/PHASE8_16_PLAN.md](docs/PHASE8_16_PLAN.md) | Phase 8〜16 統合開発計画（依存関係・完了基準・進捗状態） |
 | [docs/PHASE6_1_RESULTS.md](docs/PHASE6_1_RESULTS.md) | Phase 6.1：通知から操作画面へ到達できない問題の原因・全通知の導線監査・再発防止策・テスト結果 |

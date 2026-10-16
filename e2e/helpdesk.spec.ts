@@ -6,7 +6,7 @@
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from './fixtures';
 
 /** 操作回数カウンター (タップ・選択・文字入力をそれぞれ1操作とする) */
 function counter() {
@@ -299,6 +299,8 @@ test('[Phase2] FAQ化・バックアップ復元・既存データ保持・iPhon
   await page.getByTestId('restore-input').setInputFiles(path);
   await page.getByRole('button', { name: '上書きして復元' }).click();
   await expect(page.getByText('バックアップから復元しました').first()).toBeVisible();
+  // ダイアログを閉じた時の「履歴を1つ戻す」処理が終わってから再読み込みする (同時だと読み込みが中断される)
+  await expect.poll(() => page.evaluate(() => (history.state as { wcModal?: string } | null)?.wcModal ?? null)).toBeNull();
   await page.reload();
   await gotoHash(page, '#/faq?state=disabled');
   await expect(page.getByTestId('faq-list')).toContainText('Outlookでメールが送信できない');

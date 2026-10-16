@@ -30,6 +30,27 @@ export async function abortWith(tx: { abort(): void; done: Promise<void> }, erro
   throw typeof error === 'string' ? new AppError(error) : error;
 }
 
+/**
+ * トランザクション内の処理で例外が起きたら、必ずトランザクションを取り消す。
+ * IndexedDB は「書き込み要求の失敗」なら自動で取り消すが、put などが同期的に投げる例外 (キーの無いレコードなど) では
+ * 取り消さず、それまでの書き込みが確定してしまう。全件の置き換え (復元・初期化) などで部分的な書き込みを残さないために使う
+ */
+export async function guardTx<T>(tx: { abort(): void; done: Promise<void> }, fn: () => Promise<T>): Promise<T> {
+  try {
+    const r = await fn();
+    await tx.done;
+    return r;
+  } catch (e) {
+    try {
+      tx.abort();
+    } catch {
+      /* 既に終了している */
+    }
+    await tx.done.catch(() => undefined);
+    throw e instanceof AppError ? e : new AppError(`保存に失敗したため、変更をすべて取り消しました（${e instanceof Error ? e.message : '不明なエラー'}）`);
+  }
+}
+
 export function fieldError<T>(errors: FieldErrors<T>): AppError {
   const fe = errors as Record<string, string>;
   return new AppError(Object.values(fe).find(Boolean) ?? '入力内容を確認してください', fe);

@@ -6,7 +6,7 @@
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type BrowserContext, type Page } from './fixtures';
 
 const CSS = `body{font-family:'Noto Sans CJK JP','Noto Sans JP',sans-serif;width:560px;padding:32px;background:#fff;color:#111;font-size:20px}h1{text-align:center;letter-spacing:.4em;font-size:34px}.big{font-size:32px;text-align:center;border-bottom:2px solid #000;margin:18px 0}p{margin:8px 0}table{border-collapse:collapse;width:100%;font-size:18px}td,th{padding:4px 6px;text-align:left}`;
 const RECEIPT = `<h1>領収書</h1><p>テスト 太郎 様</p><p class="big">¥5,500-</p><p>但し 文房具代として</p><p>上記正に領収いたしました</p><p>発行日 2026年10月12日</p><p>内消費税（10%） ¥500</p><p>みどり事務用品株式会社</p><p>登録番号 T9876543210987</p>`;

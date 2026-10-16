@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect } from 'react';
 import { FileQuestion } from 'lucide-react';
 import { AppDataProvider } from './AppData';
 import { Layout } from './Layout';
+import { ErrorBoundary } from './ErrorBoundary';
 import { useRoute } from './router';
 import { ToastProvider } from '../ui/Toast';
 import { DashboardPage } from '../pages/DashboardPage';
@@ -120,21 +121,26 @@ function Routes() {
   }
   return (
     <Layout active={active}>
-      <Suspense fallback={<div className="min-h-[50vh]" aria-busy="true" />}>
-        <div key={route.path} className="animate-fade-in">
-          {page}
-        </div>
-      </Suspense>
+      {/* 画面ごとの境界: 1つの画面の表示失敗でアプリ全体を止めない (画面を移ると解除) */}
+      <ErrorBoundary key={route.path} scope="page">
+        <Suspense fallback={<div className="min-h-[50vh]" aria-busy="true" />}>
+          <div key={route.path} className="animate-fade-in">
+            {page}
+          </div>
+        </Suspense>
+      </ErrorBoundary>
     </Layout>
   );
 }
 
 export function App() {
   return (
-    <ToastProvider>
-      <AppDataProvider>
-        <Routes />
-      </AppDataProvider>
-    </ToastProvider>
+    <ErrorBoundary scope="app">
+      <ToastProvider>
+        <AppDataProvider>
+          <Routes />
+        </AppDataProvider>
+      </ToastProvider>
+    </ErrorBoundary>
   );
 }

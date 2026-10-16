@@ -7,7 +7,7 @@
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page, testNow } from './fixtures';
 
 function counter() {
   const c = { taps: 0, inputs: 0 };
@@ -34,7 +34,7 @@ function counter() {
 }
 
 function isoAfter(days: number): string {
-  const d = new Date();
+  const d = testNow();
   d.setDate(d.getDate() + days);
   const p = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;

@@ -3,7 +3,7 @@
  * 画面に移動できるだけでは合格にしない。移動先で操作を実行し、通知が更新・解消されるまでを確認する。
  * iPhone 13 相当 / デスクトップ の2環境で実行する。
  */
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './fixtures';
 
 async function gotoHash(page: Page, hash: string) {
   await page.evaluate((h) => (window.location.hash = h), hash);

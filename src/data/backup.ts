@@ -11,6 +11,7 @@
  * 復元前に各ファイルの SHA-256 を計算し、書類に記録したハッシュと一致するかを検証する。
  */
 import { isValidISODate } from '../domain/date';
+import { repairOptionalReferences } from './repair';
 import { validateRecurrence } from '../domain/recurrence';
 import { createDefaultInquiryCategories } from '../domain/helpdesk/defaults';
 import { emptyInventory } from '../domain/inventory/defaults';
@@ -101,7 +102,7 @@ export async function decodeBackupFiles(backup: BackupFile): Promise<{ ok: true;
 }
 
 export type BackupValidation =
-  | { ok: true; backup: BackupFile; counts: Record<keyof DataSnapshot, number>; sourceVersion: number }
+  | { ok: true; backup: BackupFile; counts: Record<keyof DataSnapshot, number>; sourceVersion: number; repairs: string[] }
   | { ok: false; errors: string[] };
 
 type Rec = Record<string, unknown>;
@@ -370,10 +371,11 @@ export function validateBackup(raw: unknown): BackupValidation {
   }
   if (errors.length) return { ok: false, errors: errors.slice(0, MAX_ERRORS) };
 
-  const data = {
+  // 任意の参照の参照切れは修復して取り込む (削除操作の後に作られたバックアップも復元できるように)
+  const { data, repairs } = repairOptionalReferences({
     ...(d as unknown as DataSnapshot),
     tasks: (d.tasks as (Task & { inquiryId?: string | null })[]).map((t) => ({ ...t, inquiryId: t.inquiryId ?? null })),
-  };
+  });
 
   // 参照整合性
   const deptIds = new Set(data.departments.map((x) => x.id));
@@ -487,7 +489,7 @@ export function validateBackup(raw: unknown): BackupValidation {
     ...(backupFiles ? { files: backupFiles } : {}),
   };
   const counts = Object.fromEntries(Object.entries(backup.data).map(([k, v]) => [k, (v as unknown[]).length])) as Record<keyof DataSnapshot, number>;
-  return { ok: true, backup, counts, sourceVersion: version };
+  return { ok: true, backup, counts, sourceVersion: version, repairs };
 }
 
 export function parseBackupText(text: string): BackupValidation {

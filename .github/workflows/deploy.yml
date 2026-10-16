@@ -1,10 +1,11 @@
-# main ブランチへの push で型チェック・テスト・ビルドを行い、GitHub Pages に公開する。
+# main ブランチへの push で型チェック・単体テスト・ビルド・E2E を行い、すべて成功した場合だけ GitHub Pages に公開する。
 # 事前に リポジトリ Settings > Pages > Source を「GitHub Actions」に設定すること。
 name: Deploy to GitHub Pages
 
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -13,7 +14,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  group: pages-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -28,13 +29,52 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - run: npm audit --audit-level=high
       - run: npm run build
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
 
+  # 重要業務の E2E (iPhone 13 相当の Chromium・デスクトップ Chromium)。失敗したら公開しない
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test --project=iphone --project=desktop
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results
+          path: test-results
+          retention-days: 7
+
+  # WebKit (Safari のエンジン) での参考検証。実機 iPhone Safari と同一ではないため、結果は参考とし公開は止めない
+  e2e-webkit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps webkit
+      - run: npx playwright test --project=webkit-iphone
+        env:
+          PW_WEBKIT: '1'
+
   deploy:
-    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: [build, e2e]
     runs-on: ubuntu-latest
     environment:
       name: github-pages

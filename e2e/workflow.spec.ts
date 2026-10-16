@@ -5,10 +5,10 @@
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, testNow } from './fixtures';
 
 function isoAfter(days: number): string {
-  const d = new Date();
+  const d = testNow();
   d.setDate(d.getDate() + days);
   while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
   const p = (n: number) => String(n).padStart(2, '0');

@@ -2,7 +2,7 @@
  * Phase 6 E2E: 通知・ナビゲーション・情報到達性
  * iPhone 13 相当 / デスクトップ の2環境。下部ナビ (タスク・メニュー) の検証は iPhone 相当のみ。
  */
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, testNow } from './fixtures';
 
 async function gotoHash(page: Page, hash: string) {
   await page.evaluate((h) => (window.location.hash = h), hash);
@@ -31,7 +31,7 @@ async function readStore<T>(page: Page, store: string): Promise<T[]> {
   }, store) as Promise<T[]>;
 }
 const todayISO = () => {
-  const d = new Date();
+  const d = testNow();
   const p = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 };
