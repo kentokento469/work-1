@@ -163,7 +163,9 @@ function checkTask(v: unknown): v is Task {
     (v.seriesId === undefined || isStrOrNull(v.seriesId)) &&
     (v.nextOccurrenceId === undefined || isStrOrNull(v.nextOccurrenceId)) &&
     (v.dependsOn === undefined || isStrArr(v.dependsOn)) &&
-    (v.links === undefined || (Array.isArray(v.links) && v.links.every((l) => isObj(l) && isStr(l.kind) && isStr(l.id))))
+    (v.links === undefined || (Array.isArray(v.links) && v.links.every((l) => isObj(l) && isStr(l.kind) && isStr(l.id)))) &&
+    // Phase 9 の項目
+    (v.formerEmployee === undefined || v.formerEmployee === null || (isObj(v.formerEmployee) && isStr(v.formerEmployee.id) && isStr(v.formerEmployee.name) && isStr(v.formerEmployee.employeeNumber)))
   );
 }
 function checkRule(v: unknown): v is OnboardingRule {

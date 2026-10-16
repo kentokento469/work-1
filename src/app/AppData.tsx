@@ -15,6 +15,7 @@ import { pendingProposals, type AutomationProposal } from '../automation/engine'
 import type { DataSnapshot, Department, Employee } from '../domain/types';
 import { deriveNotices, isUnread, readNoticeState, type AppNotice, type NoticeState } from '../domain/notifications';
 import { AppError, WorkCoreService } from '../services/workcoreService';
+import { storageErrorMessage } from '../services/common';
 import { useToast } from '../ui/Toast';
 
 interface AppDataValue {
@@ -52,15 +53,24 @@ export interface RunOptions<T> {
 
 const Ctx = createContext<AppDataValue | null>(null);
 
+/** 同じ端末の別のタブへ「データが変わった」ことを知らせるチャンネル名 (データ本体は送らない) */
+const SYNC_CHANNEL = 'workcore-data';
+type SyncMessage = { type: 'changed'; at: number };
+
 // 起動処理は1回だけ実行する (React StrictMode で effect が二重実行されても初期データ投入が重複しないように)
-let bootPromise: Promise<{ service: WorkCoreService; seeded: boolean }> | null = null;
+let bootPromise: Promise<{ service: WorkCoreService; seeded: boolean; migrationProblems: number }> | null = null;
 function boot() {
   bootPromise ??= (async () => {
     if (!window.indexedDB) throw new StorageUnavailableError();
     const db = await openWorkCoreDB();
     const service = new WorkCoreService(db);
     const seeded = await service.ensureInitialized();
-    return { service, seeded };
+    // 版の更新の直後は、移行したデータを点検する (失敗しても起動は続ける)
+    const migration = await service.verifyMigration().catch((e) => {
+      console.error('[WorkCore] 移行後の点検に失敗', e);
+      return null;
+    });
+    return { service, seeded, migrationProblems: migration?.errors.length ?? 0 };
   })();
   return bootPromise;
 }
@@ -121,11 +131,12 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     (async () => {
       try {
-        const { service, seeded } = await boot();
+        const { service, seeded, migrationProblems } = await boot();
         const data = await service.loadSnapshot();
         if (cancelled) return;
         setState({ status: 'ready', service, data });
         if (seeded) toast.info('デモデータを読み込みました。自由に操作してお試しください。');
+        if (migrationProblems) toast.error(`データの版を更新しましたが、自動で直せない問題が${migrationProblems}件あります。データ管理の「データを点検する」で確認してください`);
         void runAuto(service);
       } catch (e) {
         if (!cancelled) {
@@ -147,6 +158,37 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     setState({ status: 'ready', service, data });
     void runAuto(service);
   }, [service, runAuto]);
+
+  /**
+   * 複数タブ: 変更を保存したら別のタブへ知らせ、受け取ったタブは最新のデータを読み直す。
+   * 編集中のフォームの入力は消えない (フォームは ID で初期化する)。同じデータを同時に編集した場合は保存時に競合として検出する
+   */
+  const channel = useRef<BroadcastChannel | null>(null);
+  const lastSyncToast = useRef(0);
+  useEffect(() => {
+    if (!service || typeof BroadcastChannel === 'undefined') return;
+    const ch = new BroadcastChannel(SYNC_CHANNEL);
+    channel.current = ch;
+    ch.onmessage = (ev: MessageEvent<SyncMessage>) => {
+      if (ev.data?.type !== 'changed') return;
+      void reload().then(() => {
+        // 続けて届いた場合は1回だけ知らせる
+        if (Date.now() - lastSyncToast.current > 5000) toast.info('別のタブでの変更を反映しました');
+        lastSyncToast.current = Date.now();
+      });
+    };
+    return () => {
+      ch.close();
+      channel.current = null;
+    };
+  }, [service, reload, toast]);
+  const notifyOtherTabs = useCallback(() => {
+    try {
+      channel.current?.postMessage({ type: 'changed', at: Date.now() } satisfies SyncMessage);
+    } catch {
+      /* 閉じたチャンネル */
+    }
+  }, []);
 
   /** 通知の記録を実データに合わせる。変化があったときだけ保存して設定を読み直す (同時に1つだけ実行) */
   const noticeSync = useRef({ running: false, again: null as AppNotice[] | null });
@@ -193,6 +235,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       if (!service) throw new AppError('データの読み込み中です');
       try {
         const result = await action(service);
+        notifyOtherTabs();
         await reload();
         if (successMessage) {
           const msg = typeof successMessage === 'function' ? successMessage(result) : successMessage;
@@ -204,6 +247,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
                   label: '元に戻す',
                   onClick: () => {
                     undo(result)(service)
+                      .then(() => notifyOtherTabs())
                       .then(reload)
                       .then(() => toast.info(opts?.undoMessage ?? '元に戻しました'))
                       .catch((e) => toast.error(e instanceof AppError ? e.message : '元に戻せませんでした'));
@@ -214,13 +258,14 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         }
         return result;
       } catch (e) {
-        const message = e instanceof AppError ? e.message : '処理に失敗しました。時間をおいて再度お試しください';
+        // 業務エラー以外 (保存領域の容量不足・接続切れなど) は、原因と次の操作が分かる説明にする
+        const message = e instanceof AppError ? e.message : storageErrorMessage(e);
         if (!(e instanceof AppError)) console.error(e);
         toast.error(message);
         throw e instanceof AppError ? e : new AppError(message);
       }
     },
-    [service, reload, toast],
+    [service, reload, toast, notifyOtherTabs],
   );
 
   const value = useMemo<AppDataValue | null>(() => {

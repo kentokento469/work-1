@@ -9,10 +9,29 @@ import type { WorkCoreSchema } from '../data/db';
 
 /** 利用者に表示してよいメッセージを持つ業務エラー */
 export class AppError extends Error {
-  constructor(message: string, public readonly fieldErrors: Record<string, string> = {}) {
+  constructor(
+    message: string,
+    public readonly fieldErrors: Record<string, string> = {},
+    /** 'conflict' = 編集を始めた後に、別のタブ・画面で同じデータが変更された */
+    public readonly code?: 'conflict',
+  ) {
     super(message);
     this.name = 'AppError';
   }
+}
+
+/** 更新時の競合検出の指定。フォームを開いた時点の更新日時を渡すと、その後に別の画面・タブで変更されていた場合は保存しない */
+export interface UpdateOptions {
+  expectedUpdatedAt?: string;
+}
+
+/**
+ * 楽観的な競合検出。最終保存優先で他の変更を黙って上書きしないよう、フォームを開いた後に変更されていたら中止する
+ * (トランザクション内で現在の値と比べるので、確認と保存の間に割り込まれることはない)
+ */
+export function conflictError(label: string, currentUpdatedAt: string): AppError {
+  const at = currentUpdatedAt.slice(0, 16).replace('T', ' ');
+  return new AppError(`この${label}は、編集を始めた後に別のタブ・画面で変更されています（${at} 更新）。入力内容はまだ保存していません。最新の内容を確認してから保存してください`, {}, 'conflict');
 }
 
 export type WriteTx = IDBPTransaction<WorkCoreSchema, StoreNames<WorkCoreSchema>[], 'readwrite'>;
@@ -30,10 +49,41 @@ export async function abortWith(tx: { abort(): void; done: Promise<void> }, erro
   throw typeof error === 'string' ? new AppError(error) : error;
 }
 
+/** 保存の失敗の種類 (利用者向けの説明を選ぶため) */
+export type StorageErrorKind = 'quota' | 'unavailable' | 'conflict' | 'aborted' | 'unknown';
+
+/** IndexedDB の例外を種類に分ける。DOMException の名前は端末・ブラウザによって異なるため、メッセージも見る */
+export function classifyStorageError(e: unknown): StorageErrorKind {
+  const name = e instanceof Error || (typeof DOMException !== 'undefined' && e instanceof DOMException) ? (e as Error).name : '';
+  const message = e instanceof Error ? e.message : String(e ?? '');
+  if (name === 'QuotaExceededError' || /quota|storage.*full|disk.*full/i.test(message)) return 'quota';
+  if (name === 'InvalidStateError' || name === 'SecurityError' || /database connection is closing|connection.*closed/i.test(message)) return 'unavailable';
+  if (name === 'ConstraintError') return 'conflict';
+  if (name === 'AbortError' || name === 'TransactionInactiveError') return 'aborted';
+  return 'unknown';
+}
+
+/** 保存の失敗を、利用者が次に何をすればよいか分かる説明にする (「変更は取り消され、元のデータは残っている」ことを必ず伝える) */
+export function storageErrorMessage(e: unknown): string {
+  switch (classifyStorageError(e)) {
+    case 'quota':
+      return '端末の保存容量が不足しているため保存できませんでした（変更は取り消され、元のデータは残っています）。不要な書類をゴミ箱から完全削除するか、写真などを整理して空き容量を確保してから、もう一度お試しください';
+    case 'unavailable':
+      return '保存領域に接続できなかったため保存できませんでした（変更は取り消されています）。別のタブで新しい版を開いた場合などに起きます。画面を再読み込みしてからもう一度お試しください';
+    case 'conflict':
+      return '同じ番号・キーのデータが既にあるため保存できませんでした（変更は取り消されています）。画面を再読み込みして最新の内容を確認してください';
+    case 'aborted':
+      return '保存が中断されたため、変更をすべて取り消しました（元のデータは残っています）。もう一度お試しください';
+    default:
+      return `保存に失敗したため、変更をすべて取り消しました（元のデータは残っています）。${e instanceof Error && e.message ? `詳細：${e.message}` : ''}`;
+  }
+}
+
 /**
  * トランザクション内の処理で例外が起きたら、必ずトランザクションを取り消す。
  * IndexedDB は「書き込み要求の失敗」なら自動で取り消すが、put などが同期的に投げる例外 (キーの無いレコードなど) では
- * 取り消さず、それまでの書き込みが確定してしまう。全件の置き換え (復元・初期化) などで部分的な書き込みを残さないために使う
+ * 取り消さず、それまでの書き込みが確定してしまう。複数のレコードを書き換える処理 (削除と関連の整理・復元・置き換えなど) で
+ * 部分的な書き込みを残さないために使う
  */
 export async function guardTx<T>(tx: { abort(): void; done: Promise<void> }, fn: () => Promise<T>): Promise<T> {
   try {
@@ -47,7 +97,7 @@ export async function guardTx<T>(tx: { abort(): void; done: Promise<void> }, fn:
       /* 既に終了している */
     }
     await tx.done.catch(() => undefined);
-    throw e instanceof AppError ? e : new AppError(`保存に失敗したため、変更をすべて取り消しました（${e instanceof Error ? e.message : '不明なエラー'}）`);
+    throw e instanceof AppError ? e : new AppError(storageErrorMessage(e));
   }
 }
 

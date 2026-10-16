@@ -13,6 +13,7 @@ import { daysUntilHire } from '../automation/onboardingEngine';
 import { formatDateJa, formatDateTimeJa } from '../domain/date';
 import type { Task } from '../domain/types';
 import { EmployeeFormModal } from '../features/EmployeeFormModal';
+import { planEmployeeTaskDeletion } from '../services/workcoreService';
 import { TaskFormModal } from '../features/TaskFormModal';
 import { TaskItem } from '../features/TaskItem';
 import { EmployeeStatusBadge } from '../ui/badges';
@@ -43,6 +44,7 @@ export function EmployeeDetailPage({ employeeId }: { employeeId: string }) {
     .filter((t) => t.employeeId === emp.id)
     .sort((a, b) => (a.status === 'done' ? 1 : 0) - (b.status === 'done' ? 1 : 0) || compareDue(a, b));
   const inquiries = data.inquiries.filter((i) => i.requesterId === emp.id);
+  const deletionPlan = planEmployeeTaskDeletion(emp.id, data.tasks);
   const done = tasks.filter((t) => t.status === 'done').length;
   const pct = tasks.length ? Math.round((done / tasks.length) * 100) : 0;
   const dept = deptById.get(emp.departmentId);
@@ -185,7 +187,16 @@ export function EmployeeDetailPage({ employeeId }: { employeeId: string }) {
             <p>
               「{emp.name}（{emp.employeeNumber}）」を削除します。
             </p>
-            {tasks.length > 0 && <p className="mt-2 font-semibold text-red-600 dark:text-red-400">関連するタスク {tasks.length}件も同時に削除されます。</p>}
+            {deletionPlan.remove.length > 0 && (
+              <p className="mt-2 font-semibold text-red-600 dark:text-red-400" data-testid="delete-plan-remove">
+                未完了のタスク {deletionPlan.remove.length}件（サブタスクを含む）も同時に削除されます。
+              </p>
+            )}
+            {deletionPlan.keep.length > 0 && (
+              <p className="mt-2" data-testid="delete-plan-keep">
+                完了済みのタスク {deletionPlan.keep.length}件は業務履歴として残します（「{emp.name}（削除済みの社員）」と表示）。
+              </p>
+            )}
             {inquiries.length > 0 && <p className="mt-2">問い合わせ {inquiries.length}件は履歴として残ります（受付時の氏名で表示）。</p>}
             <p className="mt-2 text-xs">退職の場合は削除せず、ステータスを「退職」に変更することをおすすめします。削除直後の通知から元に戻せます。</p>
           </>

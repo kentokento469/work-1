@@ -22,7 +22,7 @@ import { ALL_AUTOMATIONS } from '../automation/registry';
 import { type AutomationAction } from '../automation/engine';
 import { createInventoryDemo } from '../demo/inventoryDemo';
 import { createDefaultEquipmentRules, createDefaultItems } from '../domain/inventory/defaults';
-import { AppError, abortWith, appendInquiryEvent, inquiryEvent, logActivity, type WriteTx } from './common';
+import { AppError, abortWith, appendInquiryEvent, inquiryEvent, logActivity, storageErrorMessage, type WriteTx } from './common';
 
 /** 二重処理を検知した場合は duplicated: true (何も変更していない) */
 export type OpResult<T = null> = { duplicated: true; value?: undefined } | { duplicated: false; value: T };
@@ -161,7 +161,7 @@ export class InventoryService {
       await tx.done;
       return r;
     } catch (e) {
-      return abortWith(tx, e instanceof AppError ? e : new AppError(e instanceof Error ? e.message : '処理に失敗しました'));
+      return abortWith(tx, e instanceof AppError ? e : new AppError(storageErrorMessage(e)));
     }
   }
 

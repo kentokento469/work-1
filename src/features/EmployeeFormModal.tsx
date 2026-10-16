@@ -4,6 +4,7 @@ import { useAppData } from '../app/AppData';
 import { EMPLOYEE_STATUSES, EMPLOYEE_STATUS_LABEL, EMPLOYMENT_TYPES, type Employee, type EmployeeStatus, type EmploymentType } from '../domain/types';
 import { normalizeEmployeeNumber, suggestEmployeeStatus, validateEmployee, type EmployeeInput, type FieldErrors } from '../domain/validation';
 import { AppError } from '../services/workcoreService';
+import { ConflictNotice } from '../ui/ConflictNotice';
 import { Modal, ModalCancelButton } from '../ui/Modal';
 import { Button, SelectField, TextAreaField, TextField } from '../ui/primitives';
 import { EmailField, PhoneField, PostalAddressFields, SuggestField, emptyAddress, finalizePhone } from '../ui/SmartInputs';
@@ -24,6 +25,22 @@ function suggestNextNumber(employees: Employee[]): string {
   return `${best.prefix}${String(best.n + 1).padStart(best.width, '0')}`;
 }
 
+/** 既存の社員をフォームの入力値にする */
+function employeeToInput(employee: Employee): EmployeeInput {
+  return {
+    employeeNumber: employee.employeeNumber,
+    name: employee.name,
+    departmentId: employee.departmentId,
+    position: employee.position,
+    employmentType: employee.employmentType,
+    hireDate: employee.hireDate,
+    retireDate: employee.retireDate,
+    status: employee.status,
+    notes: employee.notes,
+    contact: { ...emptyContact(), ...employee.contact },
+  };
+}
+
 export function EmployeeFormModal({
   open,
   onClose,
@@ -35,24 +52,13 @@ export function EmployeeFormModal({
   employee?: Employee;
   onSaved?: (e: Employee, isNew: boolean) => void;
 }) {
-  const { data, run, today } = useAppData();
+  const { data, run, reload, today } = useAppData();
   const deptOptions = data.departments.map((d) => ({ value: d.id, label: d.name }));
 
   const initial = useMemo<EmployeeInput>(
     () =>
       employee
-        ? {
-            employeeNumber: employee.employeeNumber,
-            name: employee.name,
-            departmentId: employee.departmentId,
-            position: employee.position,
-            employmentType: employee.employmentType,
-            hireDate: employee.hireDate,
-            retireDate: employee.retireDate,
-            status: employee.status,
-            notes: employee.notes,
-            contact: { ...emptyContact(), ...employee.contact },
-          }
+        ? employeeToInput(employee)
         : {
             employeeNumber: suggestNextNumber(data.employees),
             name: '',
@@ -67,8 +73,9 @@ export function EmployeeFormModal({
           },
     // モーダルを開くたびに初期化する。入力中にデータが再読み込みされても (自動実行・通知の更新など) 入力を消さないよう、
     // 社員一覧 (次の社員番号の提案) は依存に含めない
+    // 別のタブの変更の反映などで社員のオブジェクトが作り直されても入力を消さないよう、対象は ID で判定する
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [employee, open],
+    [employee?.id, open],
   );
 
   const [form, setForm] = useState<EmployeeInput>(initial);
@@ -77,6 +84,9 @@ export function EmployeeFormModal({
   const [saving, setSaving] = useState(false);
   // 連絡先欄の開閉は利用者の操作に任せる (入力を消しても勝手に閉じない)
   const [contactOpen, setContactOpen] = useState(false);
+  /** フォームを開いた時点の更新日時 (別のタブ・画面での変更を検出する) */
+  const [baseUpdatedAt, setBaseUpdatedAt] = useState<string | undefined>(undefined);
+  const [conflict, setConflict] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -84,8 +94,11 @@ export function EmployeeFormModal({
       setErrors({});
       setStatusTouched(!!employee);
       setContactOpen(Object.values(initial.contact ?? {}).some(Boolean));
+      setBaseUpdatedAt(employee?.updatedAt);
+      setConflict(false);
     }
-  }, [open, initial, employee]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, initial]);
 
   const set = <K extends keyof EmployeeInput>(key: K, value: EmployeeInput[K]) => {
     setForm((f) => {
@@ -117,6 +130,10 @@ export function EmployeeFormModal({
 
   const submit = async (ev: FormEvent) => {
     ev.preventDefault();
+    await save(baseUpdatedAt);
+  };
+
+  const save = async (expectedUpdatedAt: string | undefined) => {
     const phone = await finalizePhone(form.contact?.phone ?? '');
     const input: EmployeeInput = form.contact ? { ...form, contact: { ...form.contact, phone } } : form;
     if (form.contact && phone !== form.contact.phone) setContact({ phone });
@@ -128,16 +145,32 @@ export function EmployeeFormModal({
     setSaving(true);
     try {
       const saved = await run(
-        (s) => (employee ? s.updateEmployee(employee.id, input) : s.createEmployee(input)),
+        (s) => (employee ? s.updateEmployee(employee.id, input, { expectedUpdatedAt }) : s.createEmployee(input)),
         employee ? '社員情報を更新しました' : `${input.name.trim()}さんを登録しました`,
       );
       onClose();
       onSaved?.(saved, !employee);
     } catch (e) {
-      if (e instanceof AppError) setErrors(e.fieldErrors as FieldErrors<EmployeeInput>);
+      if (e instanceof AppError && e.code === 'conflict') {
+        await reload();
+        setConflict(true);
+      } else if (e instanceof AppError) setErrors(e.fieldErrors as FieldErrors<EmployeeInput>);
     } finally {
       setSaving(false);
     }
+  };
+
+  const latest = employee ? data.employees.find((e) => e.id === employee.id) : undefined;
+  const loadLatest = () => {
+    if (!latest) return;
+    setForm(employeeToInput(latest));
+    setBaseUpdatedAt(latest.updatedAt);
+    setConflict(false);
+    setErrors({});
+  };
+  const overwrite = () => {
+    setConflict(false);
+    void save(latest?.updatedAt);
   };
 
   return (
@@ -156,6 +189,7 @@ export function EmployeeFormModal({
         </>
       }
     >
+      {conflict && <ConflictNotice label="社員の情報" onLoadLatest={loadLatest} onOverwrite={overwrite} busy={saving} />}
       <form id="employee-form" onSubmit={submit} noValidate className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <TextField
           label="社員番号"

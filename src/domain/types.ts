@@ -136,6 +136,9 @@ export interface Task {
   dependsOn?: string[];
   /** 関連データ (品目・発注書・書類など。元の画面へ戻るためのリンク) */
   links?: TaskLink[];
+  // ---- Phase 9 ----
+  /** 対象社員の削除後も業務履歴として残した完了済みタスクの、削除時点の社員 (氏名で表示する) */
+  formerEmployee?: { id: string; name: string; employeeNumber: string } | null;
 }
 
 export interface ChecklistItem {

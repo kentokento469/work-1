@@ -56,8 +56,8 @@ export function tasksToCsv(data: Pick<DataSnapshot, 'tasks' | 'employees' | 'dep
       const e = t.employeeId ? emp.get(t.employeeId) : undefined;
       return [
         t.title,
-        e ? e.employeeNumber : '',
-        e ? e.name : '',
+        e ? e.employeeNumber : (t.formerEmployee?.employeeNumber ?? ''),
+        e ? e.name : t.formerEmployee ? `${t.formerEmployee.name}（削除済み）` : '',
         (t.assigneeDepartmentId && dept.get(t.assigneeDepartmentId)) ?? '',
         t.assignee,
         PRIORITY_LABEL[t.priority],

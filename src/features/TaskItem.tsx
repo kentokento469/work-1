@@ -180,6 +180,12 @@ export function TaskItem({ task, onOpen, showEmployee = true, note }: { task: Ta
                   対象：{emp.name}
                 </span>
               )}
+              {showEmployee && !emp && task.formerEmployee && (
+                <span className="inline-flex items-center gap-1" data-testid="former-employee">
+                  <User className="size-3" aria-hidden />
+                  対象：{task.formerEmployee.name}（削除済みの社員）
+                </span>
+              )}
               {(task.assigneeDepartmentId || task.assignee) && (
                 <span className="inline-flex items-center gap-1">
                   <Building2 className="size-3" aria-hidden />

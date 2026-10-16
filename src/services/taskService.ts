@@ -13,7 +13,7 @@ import { nextOccurrence } from '../domain/recurrence';
 import { TASK_STATUS_LABEL, type ChecklistItem, type Project, type Task, type TaskSource, type TaskStatus } from '../domain/types';
 import { validateTask, type TaskInput } from '../domain/validation';
 import type { WorkCoreDB } from '../data/db';
-import { AppError, abortWith, appendInquiryEvent, fieldError, inquiryEvent, logActivity, type WriteTx } from './common';
+import { AppError, abortWith, appendInquiryEvent, conflictError, fieldError, guardTx, inquiryEvent, logActivity, type UpdateOptions, type WriteTx } from './common';
 
 export interface DeletedTask extends Task {
   /** 一緒に削除したサブタスク (元に戻す用) */
@@ -118,28 +118,30 @@ export class TaskService {
     return task;
   }
 
-  async updateTask(id: string, input: TaskInput): Promise<Task> {
+  async updateTask(id: string, input: TaskInput, opts: UpdateOptions = {}): Promise<Task> {
     const tx = this.db.transaction([...TASK_STORES], 'readwrite');
-    const current = await tx.objectStore('tasks').get(id);
-    if (!current) return abortWith(tx, '対象のタスクが見つかりません');
-    const ctx = await this.context(tx, id);
-    const clean = normalize(input, new Set(ctx.tasks.map((t) => t.id)));
-    const v = validateTask(clean, ctx);
-    if (!v.ok) return abortWith(tx, fieldError(v.errors));
-    const now = nowISO();
-    const task: Task = {
-      ...current,
-      ...clean,
-      updatedAt: now,
-      completedAt: clean.status === 'done' ? (current.completedAt ?? now) : null,
-    };
-    await tx.objectStore('tasks').put(task);
-    await this.reflectToInquiry(tx, current, task);
-    if (current.status !== 'done') await this.spawnNextOccurrence(tx, task, now);
-    const statusChanged = current.status !== task.status;
-    await logActivity(tx, 'task', 'update', statusChanged ? `タスク「${task.title}」を「${TASK_STATUS_LABEL[task.status]}」に変更しました` : `タスク「${task.title}」を更新しました`, id);
-    await tx.done;
-    return task;
+    return guardTx(tx, async () => {
+      const current = await tx.objectStore('tasks').get(id);
+      if (!current) return abortWith(tx, '対象のタスクが見つかりません（別のタブ・画面で削除された可能性があります）');
+      if (opts.expectedUpdatedAt && current.updatedAt !== opts.expectedUpdatedAt) return abortWith(tx, conflictError('タスク', current.updatedAt));
+      const ctx = await this.context(tx, id);
+      const clean = normalize(input, new Set(ctx.tasks.map((t) => t.id)));
+      const v = validateTask(clean, ctx);
+      if (!v.ok) return abortWith(tx, fieldError(v.errors));
+      const now = nowISO();
+      const task: Task = {
+        ...current,
+        ...clean,
+        updatedAt: now,
+        completedAt: clean.status === 'done' ? (current.completedAt ?? now) : null,
+      };
+      await tx.objectStore('tasks').put(task);
+      await this.reflectToInquiry(tx, current, task);
+      if (current.status !== 'done') await this.spawnNextOccurrence(tx, task, now);
+      const statusChanged = current.status !== task.status;
+      await logActivity(tx, 'task', 'update', statusChanged ? `タスク「${task.title}」を「${TASK_STATUS_LABEL[task.status]}」に変更しました` : `タスク「${task.title}」を更新しました`, id);
+      return task;
+    });
   }
 
   /**
@@ -148,55 +150,58 @@ export class TaskService {
    */
   async setTaskStatus(id: string, status: TaskStatus, opts: { completeSubtasks?: boolean } = {}): Promise<Task & { previousStatus: TaskStatus; nextOccurrence?: Task | null }> {
     const tx = this.db.transaction(['tasks', 'activities', 'inquiries'], 'readwrite');
-    const current = await tx.objectStore('tasks').get(id);
-    if (!current) return abortWith(tx, '対象のタスクが見つかりません');
-    const now = nowISO();
-    const task: Task = { ...current, status, updatedAt: now, completedAt: status === 'done' ? (current.completedAt ?? now) : null };
-    await tx.objectStore('tasks').put(task);
-    await this.reflectToInquiry(tx, current, task);
-    if (status === 'done' && opts.completeSubtasks) {
-      const subs = (await tx.objectStore('tasks').getAll()).filter((t) => t.parentTaskId === id && t.status !== 'done');
-      for (const s of subs) {
-        const done = { ...s, status: 'done' as const, updatedAt: now, completedAt: now };
-        await tx.objectStore('tasks').put(done);
-        await this.reflectToInquiry(tx, s, done);
+    return guardTx(tx, async () => {
+      const current = await tx.objectStore('tasks').get(id);
+      if (!current) return abortWith(tx, '対象のタスクが見つかりません');
+      const now = nowISO();
+      const task: Task = { ...current, status, updatedAt: now, completedAt: status === 'done' ? (current.completedAt ?? now) : null };
+      await tx.objectStore('tasks').put(task);
+      await this.reflectToInquiry(tx, current, task);
+      if (status === 'done' && opts.completeSubtasks) {
+        const subs = (await tx.objectStore('tasks').getAll()).filter((t) => t.parentTaskId === id && t.status !== 'done');
+        for (const s of subs) {
+          const done = { ...s, status: 'done' as const, updatedAt: now, completedAt: now };
+          await tx.objectStore('tasks').put(done);
+          await this.reflectToInquiry(tx, s, done);
+        }
       }
-    }
-    const next = current.status !== 'done' ? await this.spawnNextOccurrence(tx, task, now) : null;
-    await logActivity(tx, 'task', 'status', `タスク「${task.title}」を「${TASK_STATUS_LABEL[status]}」に変更しました`, id);
-    await tx.done;
-    return { ...task, previousStatus: current.status, nextOccurrence: next };
+      const next = current.status !== 'done' ? await this.spawnNextOccurrence(tx, task, now) : null;
+      await logActivity(tx, 'task', 'status', `タスク「${task.title}」を「${TASK_STATUS_LABEL[status]}」に変更しました`, id);
+      return { ...task, previousStatus: current.status, nextOccurrence: next };
+    });
   }
 
   /** 削除したタスクを返す (Undo 用)。サブタスクも一緒に削除する */
   async deleteTask(id: string): Promise<DeletedTask> {
     const tx = this.db.transaction(['tasks', 'activities', 'inquiries'], 'readwrite');
-    const current = await tx.objectStore('tasks').get(id);
-    if (!current) return abortWith(tx, '対象のタスクが見つかりません');
-    const subs = (await tx.objectStore('tasks').getAll()).filter((t) => t.parentTaskId === id);
-    for (const t of [current, ...subs]) {
-      await tx.objectStore('tasks').delete(t.id);
-      if (t.inquiryId) await appendInquiryEvent(tx, t.inquiryId, inquiryEvent('task', `タスク「${t.title}」を削除しました`));
-    }
-    await logActivity(tx, 'task', 'delete', `タスク「${current.title}」を削除しました${subs.length ? `（サブタスク${subs.length}件を含む）` : ''}`, id);
-    await tx.done;
-    return { ...current, removedSubtasks: subs };
+    return guardTx(tx, async () => {
+      const current = await tx.objectStore('tasks').get(id);
+      if (!current) return abortWith(tx, '対象のタスクが見つかりません');
+      const subs = (await tx.objectStore('tasks').getAll()).filter((t) => t.parentTaskId === id);
+      for (const t of [current, ...subs]) {
+        await tx.objectStore('tasks').delete(t.id);
+        if (t.inquiryId) await appendInquiryEvent(tx, t.inquiryId, inquiryEvent('task', `タスク「${t.title}」を削除しました`));
+      }
+      await logActivity(tx, 'task', 'delete', `タスク「${current.title}」を削除しました${subs.length ? `（サブタスク${subs.length}件を含む）` : ''}`, id);
+      return { ...current, removedSubtasks: subs };
+    });
   }
 
   async restoreTask(deleted: DeletedTask): Promise<void> {
     const tx = this.db.transaction(['tasks', 'employees', 'inquiries', 'projects', 'activities'], 'readwrite');
-    const { removedSubtasks = [], ...task } = deleted;
-    if (await tx.objectStore('tasks').get(task.id)) return abortWith(tx, 'このタスクは既に存在します');
-    for (const t of [task as Task, ...removedSubtasks]) {
-      // 紐付け先が消えていたら紐付けを外して復元する
-      const employeeId = t.employeeId && (await tx.objectStore('employees').get(t.employeeId)) ? t.employeeId : null;
-      const inquiryId = t.inquiryId && (await tx.objectStore('inquiries').get(t.inquiryId)) ? t.inquiryId : null;
-      const projectId = t.projectId && (await tx.objectStore('projects').get(t.projectId)) ? t.projectId : null;
-      await tx.objectStore('tasks').put({ ...t, employeeId, inquiryId, projectId });
-      if (inquiryId) await appendInquiryEvent(tx, inquiryId, inquiryEvent('task', `タスク「${t.title}」の削除を取り消しました`));
-    }
-    await logActivity(tx, 'task', 'restore', `タスク「${task.title}」の削除を取り消しました`, task.id);
-    await tx.done;
+    return guardTx(tx, async () => {
+      const { removedSubtasks = [], ...task } = deleted;
+      if (await tx.objectStore('tasks').get(task.id)) return abortWith(tx, 'このタスクは既に存在します');
+      for (const t of [task as Task, ...removedSubtasks]) {
+        // 紐付け先が消えていたら紐付けを外して復元する
+        const employeeId = t.employeeId && (await tx.objectStore('employees').get(t.employeeId)) ? t.employeeId : null;
+        const inquiryId = t.inquiryId && (await tx.objectStore('inquiries').get(t.inquiryId)) ? t.inquiryId : null;
+        const projectId = t.projectId && (await tx.objectStore('projects').get(t.projectId)) ? t.projectId : null;
+        await tx.objectStore('tasks').put({ ...t, employeeId, inquiryId, projectId });
+        if (inquiryId) await appendInquiryEvent(tx, inquiryId, inquiryEvent('task', `タスク「${t.title}」の削除を取り消しました`));
+      }
+      await logActivity(tx, 'task', 'restore', `タスク「${task.title}」の削除を取り消しました`, task.id);
+    });
   }
 
   /** 複製 (未着手・チェックリスト未完了の状態で作る。繰り返しは別の系列になる) */
@@ -285,25 +290,27 @@ export class TaskService {
   /** 削除: タスクは消さず、所属だけ外す。戻り値は元に戻す用 */
   async deleteProject(id: string): Promise<{ project: Project; taskIds: string[] }> {
     const tx = this.db.transaction(['projects', 'tasks', 'activities'], 'readwrite');
-    const p = await tx.objectStore('projects').get(id);
-    if (!p) return abortWith(tx, '対象のプロジェクトが見つかりません');
-    const tasks = (await tx.objectStore('tasks').getAll()).filter((t) => t.projectId === id);
-    for (const t of tasks) await tx.objectStore('tasks').put({ ...t, projectId: null });
-    await tx.objectStore('projects').delete(id);
-    await logActivity(tx, 'project', 'delete', `プロジェクト「${p.name}」を削除しました（タスク${tasks.length}件は残し、所属を外しました）`, id);
-    await tx.done;
-    return { project: p, taskIds: tasks.map((t) => t.id) };
+    return guardTx(tx, async () => {
+      const p = await tx.objectStore('projects').get(id);
+      if (!p) return abortWith(tx, '対象のプロジェクトが見つかりません');
+      const tasks = (await tx.objectStore('tasks').getAll()).filter((t) => t.projectId === id);
+      for (const t of tasks) await tx.objectStore('tasks').put({ ...t, projectId: null });
+      await tx.objectStore('projects').delete(id);
+      await logActivity(tx, 'project', 'delete', `プロジェクト「${p.name}」を削除しました（タスク${tasks.length}件は残し、所属を外しました）`, id);
+      return { project: p, taskIds: tasks.map((t) => t.id) };
+    });
   }
 
   async restoreProject(deleted: { project: Project; taskIds: string[] }): Promise<void> {
     const tx = this.db.transaction(['projects', 'tasks', 'activities'], 'readwrite');
-    if (await tx.objectStore('projects').get(deleted.project.id)) return abortWith(tx, 'このプロジェクトは既に存在します');
-    await tx.objectStore('projects').put(deleted.project);
-    for (const id of deleted.taskIds) {
-      const t = await tx.objectStore('tasks').get(id);
-      if (t && !t.projectId) await tx.objectStore('tasks').put({ ...t, projectId: deleted.project.id });
-    }
-    await logActivity(tx, 'project', 'restore', `プロジェクト「${deleted.project.name}」の削除を取り消しました`, deleted.project.id);
-    await tx.done;
+    return guardTx(tx, async () => {
+      if (await tx.objectStore('projects').get(deleted.project.id)) return abortWith(tx, 'このプロジェクトは既に存在します');
+      await tx.objectStore('projects').put(deleted.project);
+      for (const id of deleted.taskIds) {
+        const t = await tx.objectStore('tasks').get(id);
+        if (t && !t.projectId) await tx.objectStore('tasks').put({ ...t, projectId: deleted.project.id });
+      }
+      await logActivity(tx, 'project', 'restore', `プロジェクト「${deleted.project.name}」の削除を取り消しました`, deleted.project.id);
+    });
   }
 }

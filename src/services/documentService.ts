@@ -26,7 +26,7 @@ import {
   type FieldKey,
 } from '../domain/documents/types';
 import { generateId, nowISO } from '../domain/id';
-import { AppError, abortWith, logActivity, type WriteTx } from './common';
+import { AppError, abortWith, logActivity, storageErrorMessage, type WriteTx } from './common';
 import type { InventoryService, OpResult } from './inventoryService';
 
 const STORES = ['documents', 'documentFiles', 'meta', 'activities', 'employees', 'inquiries', 'purchaseOrders', 'items'] as const;
@@ -89,8 +89,7 @@ export class DocumentService {
       await tx.done;
       return r;
     } catch (e) {
-      if (isQuotaError(e) || (e instanceof Error && /quota/i.test(e.message)))
-        return abortWith(tx, new AppError('端末の保存容量が不足しているため保存できませんでした。不要な書類をゴミ箱から完全削除するか、バックアップを取ってから古いデータを整理してください'));
+      if (isQuotaError(e) || (e instanceof Error && /quota/i.test(e.message))) return abortWith(tx, new AppError(storageErrorMessage(e)));
       return abortWith(tx, e instanceof AppError ? e : new AppError(e instanceof Error ? e.message : '処理に失敗しました'));
     }
   }

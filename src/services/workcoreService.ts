@@ -11,12 +11,15 @@ import { generateId, nowISO } from '../domain/id';
 import { cleanContact, normalizeEmployeeNumber, validateEmployee, validateRule, type EmployeeInput, type RuleInput, type TaskInput } from '../domain/validation';
 import { type DataSnapshot, type Department, type Employee, type OnboardingRule, type Task, type TaskStatus } from '../domain/types';
 import type { BackupFile } from '../data/backup';
-import { DATA_STORES, STORE_NAMES, type WorkCoreDB } from '../data/db';
+import { DATA_STORES, MIGRATION_CHECK_KEY, STORE_NAMES, type WorkCoreDB } from '../data/db';
 import { emptyInventory } from '../domain/inventory/defaults';
 import { InventoryService } from './inventoryService';
 import { createDemoData, createHelpdeskDemoData } from '../demo/demoData';
 import { createDefaultInquiryCategories } from '../domain/helpdesk/defaults';
-import { AppError, abortWith, fieldError, guardTx, logActivity, type WriteTx } from './common';
+import { AppError, abortWith, conflictError, fieldError, guardTx, logActivity, storageErrorMessage, type UpdateOptions, type WriteTx } from './common';
+import { SafetyStore } from '../data/safety';
+import { createBackup, validateBackup } from '../data/backup';
+import { repairOptionalReferences } from '../data/repair';
 import { HelpdeskService } from './helpdeskService';
 import { ALL_AUTOMATIONS } from '../automation/registry';
 import { pendingProposals } from '../automation/engine';
@@ -31,9 +34,24 @@ export { AppError } from './common';
 /** 削除の取り消し (Undo) 用に保持するデータ */
 export interface DeletedEmployee {
   employee: Employee;
+  /** 一緒に削除した未完了のタスク (とそのサブタスク) */
   tasks: Task[];
+  /** 業務履歴として残し、社員との関連付けだけを外した完了済みタスク (取り消し時に戻す) */
+  keptTaskIds?: string[];
   /** 関連付けを外した書類 (取り消し時に戻す) */
   unlinkedDocumentIds?: string[];
+}
+
+/**
+ * 社員の削除時のタスクの扱いを決める (画面の確認ダイアログと同じ判定を使う)。
+ * remove: その社員の未完了タスクと、それらのサブタスク (完了済みでも親と一緒に削除)
+ * keep: その社員の完了済みタスク (親が削除対象のものを除く)。社員との関連付けだけを外して残す
+ */
+export function planEmployeeTaskDeletion(employeeId: string, tasks: Task[]): { remove: Task[]; keep: Task[] } {
+  const own = tasks.filter((t) => t.employeeId === employeeId);
+  const removeIds = new Set(own.filter((t) => t.status !== 'done').map((t) => t.id));
+  for (const t of tasks) if (t.parentTaskId && removeIds.has(t.parentTaskId)) removeIds.add(t.id);
+  return { remove: tasks.filter((t) => removeIds.has(t.id)), keep: own.filter((t) => !removeIds.has(t.id)) };
 }
 
 export class WorkCoreService {
@@ -41,8 +59,11 @@ export class WorkCoreService {
   readonly inventory: InventoryService;
   readonly documents: DocumentService;
   readonly tasks: TaskService;
+  /** 全データの置き換えの直前に、現在のデータを1世代だけ退避する (Phase 9) */
+  readonly safety: SafetyStore;
 
   constructor(private readonly db: WorkCoreDB, private readonly clock: () => string = todayISO) {
+    this.safety = new SafetyStore(`${db.name}-safety`);
     this.helpdesk = new HelpdeskService(db, clock);
     this.inventory = new InventoryService(db, clock);
     this.documents = new DocumentService(db, clock, this.inventory);
@@ -115,10 +136,11 @@ export class WorkCoreService {
     return employee;
   }
 
-  async updateEmployee(id: string, input: EmployeeInput): Promise<Employee> {
+  async updateEmployee(id: string, input: EmployeeInput, opts: UpdateOptions = {}): Promise<Employee> {
     const tx = this.db.transaction(['employees', 'departments', 'activities'], 'readwrite');
     const current = await tx.objectStore('employees').get(id);
-    if (!current) return abortWith(tx, '対象の社員が見つかりません');
+    if (!current) return abortWith(tx, '対象の社員が見つかりません（別のタブ・画面で削除された可能性があります）');
+    if (opts.expectedUpdatedAt && current.updatedAt !== opts.expectedUpdatedAt) return abortWith(tx, conflictError('社員の情報', current.updatedAt));
     const v = validateEmployee(input, await this.employeeContext(tx, id));
     if (!v.ok) return abortWith(tx, fieldError(v.errors));
     const employee: Employee = {
@@ -140,48 +162,60 @@ export class WorkCoreService {
   }
 
   /**
-   * 社員を削除し、紐づくタスクも同時に削除する (孤立データを残さない)。
-   * 問い合わせは受付時点の氏名を保持しているので履歴として残る。
-   * 戻り値は Undo 用。
+   * 社員を削除する (Phase 9 で方針を見直し)。
+   * - 未完了のタスク (その社員のための準備・作業) は一緒に削除する。そのサブタスクも一緒に削除する (親を失ったサブタスクを残さない)
+   * - 完了済みのタスクは業務履歴なので削除せず、社員との関連付けだけを外して削除時点の氏名を残す
+   * - 書類は関連付けだけを外す。問い合わせは受付時点の氏名を保持しているので履歴として残る
+   * 戻り値は「元に戻す」用。退職者は削除ではなくステータスを「退職」にすることを画面で案内する
    */
   async deleteEmployee(id: string): Promise<DeletedEmployee> {
     const tx = this.db.transaction(['employees', 'tasks', 'activities', 'assets', 'reservations', 'documents'], 'readwrite');
-    const employee = await tx.objectStore('employees').get(id);
-    if (!employee) return abortWith(tx, '対象の社員が見つかりません');
-    // 貸与中・予約中の機器がある社員を削除すると、資産の利用者が不明になるため拒否する
-    const [assets, reservations] = await Promise.all([tx.objectStore('assets').index('byAssignee').getAll(id), tx.objectStore('reservations').index('byEmployee').getAll(id)]);
-    const holding = assets.filter((a) => a.status === 'in_use' || a.status === 'reserved').length;
-    const reserving = reservations.filter((r) => r.status === 'active' || r.status === 'backorder').length;
-    if (holding + reserving > 0)
-      return abortWith(tx, `貸与中・予約中の機器があるため削除できません（資産${holding}台・予約${reserving}件）。返却または予約解除をしてから削除するか、ステータスを「退職」にしてください`);
-    const own = await tx.objectStore('tasks').index('byEmployee').getAll(id);
-    // 削除するタスクのサブタスク (別の社員・社員なし) も一緒に削除する (親を失ったサブタスクを残さない)。元に戻すと一緒に戻る
-    const ownIds = new Set(own.map((t) => t.id));
-    const subs = (await tx.objectStore('tasks').getAll()).filter((t) => t.parentTaskId && ownIds.has(t.parentTaskId) && !ownIds.has(t.id));
-    const tasks = [...own, ...subs];
-    for (const t of tasks) await tx.objectStore('tasks').delete(t.id);
-    // 書類は業務記録なので削除せず、社員との関連付けだけを外す
-    const docs = (await tx.objectStore('documents').getAll()).filter((d) => d.employeeId === id);
-    for (const d of docs) await tx.objectStore('documents').put({ ...d, employeeId: null, updatedAt: nowISO(), history: [...d.history, { at: nowISO(), message: `関連社員「${employee.name}」の削除により関連付けを解除` }] });
-    await tx.objectStore('employees').delete(id);
-    await logActivity(tx, 'employee', 'delete', `社員「${employee.name}」を削除しました（関連タスク${tasks.length}件も削除${docs.length ? `・書類${docs.length}件の関連付けを解除` : ''}）`, id);
-    await tx.done;
-    return { employee, tasks, unlinkedDocumentIds: docs.map((d) => d.id) };
+    return guardTx(tx, async () => {
+      const employee = await tx.objectStore('employees').get(id);
+      if (!employee) return abortWith(tx, '対象の社員が見つかりません');
+      // 貸与中・予約中の機器がある社員を削除すると、資産の利用者が不明になるため拒否する
+      const [assets, reservations] = await Promise.all([tx.objectStore('assets').index('byAssignee').getAll(id), tx.objectStore('reservations').index('byEmployee').getAll(id)]);
+      const holding = assets.filter((a) => a.status === 'in_use' || a.status === 'reserved').length;
+      const reserving = reservations.filter((r) => r.status === 'active' || r.status === 'backorder').length;
+      if (holding + reserving > 0)
+        return abortWith(tx, `貸与中・予約中の機器があるため削除できません（資産${holding}台・予約${reserving}件）。返却または予約解除をしてから削除するか、ステータスを「退職」にしてください`);
+      const allTasks = await tx.objectStore('tasks').getAll();
+      const plan = planEmployeeTaskDeletion(id, allTasks);
+      for (const t of plan.remove) await tx.objectStore('tasks').delete(t.id);
+      const now = nowISO();
+      const former = { id: employee.id, name: employee.name, employeeNumber: employee.employeeNumber };
+      for (const t of plan.keep) await tx.objectStore('tasks').put({ ...t, employeeId: null, formerEmployee: former, updatedAt: now });
+      // 書類は業務記録なので削除せず、社員との関連付けだけを外す
+      const docs = (await tx.objectStore('documents').getAll()).filter((d) => d.employeeId === id);
+      for (const d of docs) await tx.objectStore('documents').put({ ...d, employeeId: null, updatedAt: now, history: [...d.history, { at: now, message: `関連社員「${employee.name}」の削除により関連付けを解除` }] });
+      await tx.objectStore('employees').delete(id);
+      const parts = [plan.remove.length ? `未完了のタスク${plan.remove.length}件を削除` : '', plan.keep.length ? `完了済みのタスク${plan.keep.length}件は履歴として残す` : '', docs.length ? `書類${docs.length}件の関連付けを解除` : ''].filter(Boolean);
+      await logActivity(tx, 'employee', 'delete', `社員「${employee.name}」を削除しました${parts.length ? `（${parts.join('・')}）` : ''}`, id);
+      return { employee, tasks: plan.remove, keptTaskIds: plan.keep.map((t) => t.id), unlinkedDocumentIds: docs.map((d) => d.id) };
+    });
   }
 
   /** deleteEmployee の取り消し。社員番号が他で使われていた場合は復元しない */
   async restoreEmployee(deleted: DeletedEmployee): Promise<void> {
     const tx = this.db.transaction(['employees', 'tasks', 'activities', 'documents'], 'readwrite');
-    const dup = await tx.objectStore('employees').index('byNumber').get(deleted.employee.employeeNumber);
-    if (dup) return abortWith(tx, `社員番号「${deleted.employee.employeeNumber}」が既に使われているため元に戻せません`);
-    await tx.objectStore('employees').put(deleted.employee);
-    for (const t of deleted.tasks) await tx.objectStore('tasks').put(t);
-    for (const did of deleted.unlinkedDocumentIds ?? []) {
-      const d = await tx.objectStore('documents').get(did);
-      if (d && d.employeeId === null) await tx.objectStore('documents').put({ ...d, employeeId: deleted.employee.id });
-    }
-    await logActivity(tx, 'employee', 'restore', `社員「${deleted.employee.name}」の削除を取り消しました`, deleted.employee.id);
-    await tx.done;
+    return guardTx(tx, async () => {
+      const dup = await tx.objectStore('employees').index('byNumber').get(deleted.employee.employeeNumber);
+      if (dup) return abortWith(tx, `社員番号「${deleted.employee.employeeNumber}」が既に使われているため元に戻せません`);
+      await tx.objectStore('employees').put(deleted.employee);
+      for (const t of deleted.tasks) await tx.objectStore('tasks').put(t);
+      for (const tid of deleted.keptTaskIds ?? []) {
+        const t = await tx.objectStore('tasks').get(tid);
+        if (t && t.employeeId === null && t.formerEmployee?.id === deleted.employee.id) {
+          const { formerEmployee: _f, ...rest } = t;
+          await tx.objectStore('tasks').put({ ...rest, employeeId: deleted.employee.id });
+        }
+      }
+      for (const did of deleted.unlinkedDocumentIds ?? []) {
+        const d = await tx.objectStore('documents').get(did);
+        if (d && d.employeeId === null) await tx.objectStore('documents').put({ ...d, employeeId: deleted.employee.id });
+      }
+      await logActivity(tx, 'employee', 'restore', `社員「${deleted.employee.name}」の削除を取り消しました`, deleted.employee.id);
+    });
   }
 
   // ---------- タスク (Phase 7 から TaskService に集約。従来の呼び出し口は互換のため残す) ----------
@@ -189,8 +223,8 @@ export class WorkCoreService {
   createTask(input: TaskInput): Promise<Task> {
     return this.tasks.createTask(input);
   }
-  updateTask(id: string, input: TaskInput): Promise<Task> {
-    return this.tasks.updateTask(id, input);
+  updateTask(id: string, input: TaskInput, opts?: UpdateOptions): Promise<Task> {
+    return this.tasks.updateTask(id, input, opts);
   }
   setTaskStatus(id: string, status: TaskStatus, opts?: { completeSubtasks?: boolean }) {
     return this.tasks.setTaskStatus(id, status, opts);
@@ -354,7 +388,19 @@ export class WorkCoreService {
 
   // ---------- データ管理 ----------
 
-  private async replaceAll(data: DataSnapshot, message: string, files: DocumentFile[] = []): Promise<void> {
+  /**
+   * 全データを置き換える。safetyReason を渡すと、置き換えの直前に現在のデータを退避する (「直前のデータに戻す」で取り消せる)。
+   * 退避に失敗した場合は置き換えを行わない (取り消せない上書きをしない)
+   */
+  private async replaceAll(data: DataSnapshot, message: string, files: DocumentFile[] = [], safetyReason?: string): Promise<void> {
+    if (safetyReason) {
+      try {
+        const [current, currentFiles] = await Promise.all([this.loadSnapshot(), this.loadAllDocumentFiles()]);
+        await this.safety.save(safetyReason, current, currentFiles, nowISO());
+      } catch (e) {
+        throw new AppError(`操作の前に現在のデータを退避できなかったため、中止しました（データは変更されていません）。先に「全データをJSONバックアップ」で保存してください。原因：${storageErrorMessage(e)}`);
+      }
+    }
     const tx = this.db.transaction([...STORE_NAMES], 'readwrite');
     // 全消去と書き込みを1つのトランザクションで行い、途中で失敗したら全体を取り消す (現在のデータを残す)
     await guardTx(tx, async () => {
@@ -371,6 +417,64 @@ export class WorkCoreService {
   }
 
   /**
+   * 版の更新 (移行) の後の最初の起動で、移行したデータの整合性を点検して操作履歴に残す (1回だけ)。
+   * 参照切れは関連付けの解除で修復する。自動で直せない問題は件数を返し、画面で知らせる
+   */
+  async verifyMigration(): Promise<{ from: number; to: number; errors: string[]; repairs: string[] } | null> {
+    const pending = (await this.db.get('meta', MIGRATION_CHECK_KEY))?.value as { from: number; to: number } | undefined;
+    if (!pending) return null;
+    const result = await this.checkIntegrity();
+    const repairs = result.repairs.length ? await this.repairIntegrity() : [];
+    const tx = this.db.transaction(['meta', 'activities'], 'readwrite');
+    await guardTx(tx, async () => {
+      await tx.objectStore('meta').delete(MIGRATION_CHECK_KEY);
+      const summary = result.errors.length ? `自動で直せない問題 ${result.errors.length}件（データ管理の「データを点検する」で確認できます）` : repairs.length ? `参照切れを修復（${repairs.join('、')}）` : '問題なし';
+      await logActivity(tx, 'data', 'migrate', `データの版を更新しました（v${pending.from} → v${pending.to}）。点検結果：${summary}`);
+    });
+    return { ...pending, errors: result.errors, repairs };
+  }
+
+  /** 退避した「直前のデータ」に戻す。戻す前の現在のデータも退避するので、もう一度押せば戻す前の状態に戻る */
+  async restoreSafetySnapshot(): Promise<void> {
+    const snap = await this.safety.load();
+    if (!snap) throw new AppError('戻せる直前のデータがありません');
+    await this.replaceAll(snap.data, `直前のデータ（${snap.at.slice(0, 16).replace('T', ' ')}の「${snap.reason}」の前の状態）に戻しました`, snap.files, '直前のデータに戻す');
+  }
+
+  /**
+   * 現在のデータの整合性を点検する (バックアップの復元と同じ検査)。
+   * errors: 自動では直せない問題 (必須の参照切れ・形式の誤りなど)。repairs: 関連付けの解除で直せる参照切れ
+   */
+  async checkIntegrity(): Promise<{ errors: string[]; repairs: string[] }> {
+    const data = await this.loadSnapshot();
+    const r = validateBackup(JSON.parse(JSON.stringify(createBackup(data))));
+    return r.ok ? { errors: [], repairs: r.repairs } : { errors: r.errors, repairs: [] };
+  }
+
+  /** 点検で見つかった参照切れを修復する (関連付けを外す・対象の無い発注候補を除く)。変わったレコードだけを書き換える */
+  async repairIntegrity(): Promise<string[]> {
+    const before = await this.loadSnapshot();
+    const { data, repairs } = repairOptionalReferences(before);
+    if (!repairs.length) return [];
+    const tx = this.db.transaction([...DATA_STORES], 'readwrite');
+    await guardTx(tx, async () => {
+      for (const name of DATA_STORES) {
+        if (name === 'activities') continue;
+        const store = tx.objectStore(name);
+        const prev = new Map((before[name] as { id: string }[]).map((r) => [r.id, JSON.stringify(r)]));
+        const nextIds = new Set<string>();
+        for (const rec of data[name] as { id: string }[]) {
+          nextIds.add(rec.id);
+          if (prev.get(rec.id) !== JSON.stringify(rec)) await store.put(rec as never);
+        }
+        for (const id of prev.keys()) if (!nextIds.has(id)) await store.delete(id);
+      }
+      await logActivity(tx, 'data', 'repair', `データの点検で見つかった参照切れを修復しました（${repairs.join('、')}）`);
+    });
+    return repairs;
+  }
+
+  /**
    * バックアップから復元。元ファイルは decodeBackupFiles() で検証済みのものを渡す。
    * 元ファイルを含まないバックアップでは、書類の抽出結果だけが復元され、原本は「なし」と表示される
    */
@@ -379,6 +483,7 @@ export class WorkCoreService {
       backup.data,
       `バックアップ（${backup.exportedAt.slice(0, 10) || '日付不明'}）から復元しました${backup.data.documents.length ? `（書類${backup.data.documents.length}件・元ファイル${files.length}件）` : ''}`,
       files,
+      'バックアップから復元',
     );
   }
 
@@ -388,7 +493,7 @@ export class WorkCoreService {
   }
 
   async resetDemoData(): Promise<void> {
-    await this.replaceAll(createDemoData(this.today()), 'デモデータを初期化しました');
+    await this.replaceAll(createDemoData(this.today()), 'デモデータを初期化しました', [], 'デモデータの初期化');
   }
 
   /** 全データを削除し、部署・ルール・カテゴリだけの空の状態にする */
@@ -412,6 +517,8 @@ export class WorkCoreService {
         inquiryCategories: createDefaultInquiryCategories(),
       },
       '社員・タスク・問い合わせ・在庫を全削除しました（部署・ルール・カテゴリ・保管場所・仕入先は初期設定）',
+      [],
+      '全削除',
     );
   }
 

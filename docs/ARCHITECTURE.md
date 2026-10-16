@@ -377,3 +377,14 @@ interface AssistProvider {
 - DB v6：`projects` ストアを追加（`migrateToV6`）。バックアップ v6（v1〜v5 は `projects=[]`、旧版のタスクのプロジェクト所属は外して取り込む）
 - `TaskService`：作成・更新（入力の正規化・検証〔開始日≦期限・タグ・チェックリスト・繰り返しは期限が必要・プロジェクト/親の存在・サブタスク1段・依存の循環〕）、状態変更（完了で繰り返しの次回を1件作成、サブタスクの一括完了）、削除（サブタスクも）と復元、複製、チェック項目の切り替え、期限の変更、プロジェクト（作成・更新・アーカイブ・削除〔所属を外す〕・復元）。`WorkCoreService` の従来のタスク操作は委譲して互換を保つ
 - 画面：`TasksPage`（`view=list|board|calendar|projects`、`status`＝主要な絞り込み〔旧来の進捗値も受け付ける〕、詳細条件はクエリに保存）、`QuickAdd`、`BoardView`、`CalendarView`、`ProjectsView`、`RelatedTasksCard`
+
+## 25. Phase 9：データ整合性・保護・復旧
+
+- 書き込みの保護：複数のレコードを書き換える処理（社員・問い合わせ・タスク・プロジェクトの削除と復元、タスクの更新・状態変更、全件の置き換え、修復）は `guardTx` で包み、途中の例外で必ずトランザクションを取り消す。在庫・書類は従来から同等の `run()` を持つ
+- 保存エラーの分類：`classifyStorageError`／`storageErrorMessage`（`services/common.ts`）で容量不足・接続切れ・重複・中断を区別し、「変更は取り消され、元のデータは残っている」ことと次の操作を表示。`AppData.run()` は業務エラー以外もこの説明で表示する
+- 複数タブ：`BroadcastChannel('workcore-data')` で「変更があった」ことだけを通知し、受け取ったタブは再読み込み（データ本体は送らない）。タスク・社員の編集は、フォームを開いた時点の `updatedAt` を `expectedUpdatedAt` として渡し、変更されていたら `AppError(code: 'conflict')` で保存を止める（`ui/ConflictNotice.tsx` で「最新を読み込む／上書き」を選ぶ）
+- 社員の削除：`planEmployeeTaskDeletion` で、未完了のタスク（とそのサブタスク）は削除、完了済みのタスクは `employeeId=null`・`formerEmployee`（削除時点の氏名・社員番号）を付けて残す。元に戻すと関連付けも戻る
+- 上書き前の退避：`data/safety.ts`（別の DB `<DB名>-safety` に1世代）。復元・初期化・全削除の直前に現在のデータと書類の元ファイルを退避し、退避できなければ上書きしない。`restoreSafetySnapshot` は戻す前の状態も退避するため往復できる
+- 点検と修復：`checkIntegrity`（バックアップの復元と同じ検査を現在のデータに実行）、`repairIntegrity`（任意の参照切れの関連付けを外す。変わったレコードだけ書き換える）
+- 移行：版ごとの段階的な移行（`db.ts` の方針コメント）。既存データを移行した場合は `pendingMigrationCheck` を記録し、最初の起動で `verifyMigration` が点検・修復して操作履歴に残す
+- 暗号化バックアップ：`data/backupCrypto.ts`（Web Crypto。PBKDF2-SHA256 600,000回 → AES-GCM 256ビット。salt・IV はランダム）。作成時に復号して一致を確認してから保存。パスワードは保存しない（忘れると復元不可）

@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Boxes, Database, Download, FileJson, FileSpreadsheet, Headset, History, RefreshCcw, ShieldCheck, Trash2, Upload } from 'lucide-react';
+import { AlertTriangle, Boxes, Database, Download, FileJson, FileSpreadsheet, Headset, History, Lock, RefreshCcw, RotateCcw, SearchCheck, ShieldCheck, Trash2, Upload } from 'lucide-react';
 import { useAppData } from '../app/AppData';
 import { downloadText, timestampForFile } from '../app/download';
 import { createBackup, decodeBackupFiles, parseBackupText, type BackupFile } from '../data/backup';
+import { MIN_PASSWORD_LENGTH, decryptBackupText, encryptBackupText, isEncryptedBackupText, validatePassword } from '../data/backupCrypto';
+import type { SafetySnapshotInfo } from '../data/safety';
 import type { DocumentFile } from '../domain/documents/types';
 import { formatBytes } from '../features/documents/engine/assets';
 import { StorageMeter } from '../features/documents/parts';
@@ -13,7 +15,8 @@ import type { ActivityCategory, DataSnapshot } from '../domain/types';
 import { DEMO_COMPANY_NAME } from '../demo/demoData';
 import { ConfirmDialog } from '../ui/Modal';
 import { useToast } from '../ui/Toast';
-import { Button, Card, CardHeader, EmptyState, FilterSelect, PageHeader } from '../ui/primitives';
+import { Button, Card, CardHeader, EmptyState, FilterSelect, PageHeader, TextField } from '../ui/primitives';
+import { Modal, ModalCancelButton } from '../ui/Modal';
 
 /** 書類の元ファイルを含むバックアップは大きくなるため上限を広げる (端末のメモリを考慮して 150MB まで) */
 const MAX_RESTORE_BYTES = 150 * 1024 * 1024;
@@ -69,6 +72,47 @@ export function DataPage() {
   const [confirmClear, setConfirmClear] = useState(false);
   const [category, setCategory] = useState('');
   const [logLimit, setLogLimit] = useState(30);
+  // 暗号化 (Phase 9)
+  const [encrypt, setEncrypt] = useState(false);
+  const [password, setPassword] = useState('');
+  const [password2, setPassword2] = useState('');
+  const [exporting, setExporting] = useState(false);
+  const [encryptedFile, setEncryptedFile] = useState<{ text: string; fileName: string } | null>(null);
+  const [decryptPassword, setDecryptPassword] = useState('');
+  const [decryptError, setDecryptError] = useState('');
+  const [decrypting, setDecrypting] = useState(false);
+  // 上書き前の退避・点検・保存領域の保護 (Phase 9)
+  const [safetyInfo, setSafetyInfo] = useState<SafetySnapshotInfo | null>(null);
+  const [confirmSafety, setConfirmSafety] = useState(false);
+  const [integrity, setIntegrity] = useState<{ errors: string[]; repairs: string[] } | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [persisted, setPersisted] = useState<boolean | null>(null);
+  useEffect(() => {
+    service.safety.info().then(setSafetyInfo).catch(() => setSafetyInfo(null));
+  }, [service, data.activities]);
+  useEffect(() => {
+    navigator.storage?.persisted?.().then(setPersisted).catch(() => setPersisted(null));
+  }, []);
+  const requestPersist = async () => {
+    try {
+      const ok = (await navigator.storage?.persist?.()) ?? false;
+      setPersisted(ok);
+      if (ok) toast.success('この端末のデータを、ブラウザの自動削除から保護しました');
+      else toast.info('ブラウザが保護を許可しませんでした。ホーム画面に追加する・ブックマークするなどで許可される場合があります');
+    } catch {
+      toast.error('このブラウザでは保護を設定できません');
+    }
+  };
+  const runCheck = async () => {
+    setChecking(true);
+    try {
+      setIntegrity(await service.checkIntegrity());
+    } catch {
+      toast.error('点検を実行できませんでした');
+    } finally {
+      setChecking(false);
+    }
+  };
 
   const exportFile = async (kind: 'employees' | 'tasks' | 'inquiries' | 'items' | 'movements' | 'assets' | 'documents' | 'json') => {
     const ts = timestampForFile();
@@ -81,12 +125,31 @@ export function DataPage() {
     else if (kind === 'documents') downloadText(`workcore_documents_${ts}.csv`, documentsToCsv(filterDocumentsForExport(data.documents, {}), data), 'text/csv;charset=utf-8');
     else {
       // 元ファイルは Base64 で埋め込む (サイズが約1.33倍になる)。含めない場合は抽出結果だけを保存
+      const pwError = encrypt ? validatePassword(password, password2) : null;
+      if (pwError) {
+        toast.error(pwError);
+        return;
+      }
       const files = includeFiles ? await service.loadAllDocumentFiles() : undefined;
       const backup = createBackup(data, new Date(), files);
-      const text = JSON.stringify(backup, null, files?.length ? 0 : 2);
+      const text = JSON.stringify(backup, null, files?.length || encrypt ? 0 : 2);
       // 作成したバックアップを、復元時と同じ検査にかける (復元できないバックアップを気付かずに保存しない)
       const check = parseBackupText(text);
-      downloadText(`workcore_backup_${ts}.json`, text, 'application/json');
+      if (encrypt) {
+        setExporting(true);
+        try {
+          const enc = await encryptBackupText(text, password);
+          // 暗号化したファイルを実際に復号して、元の内容と一致することを確かめてから保存する
+          const back = await decryptBackupText(enc, password);
+          if (!back.ok || back.text !== text) {
+            toast.error('暗号化の検証に失敗したため、保存を中止しました');
+            return;
+          }
+          downloadText(`workcore_backup_${ts}.encrypted.json`, enc, 'application/json');
+        } finally {
+          setExporting(false);
+        }
+      } else downloadText(`workcore_backup_${ts}.json`, text, 'application/json');
       if (!check.ok) toast.error(`このバックアップはそのままでは復元できない状態です：${check.errors[0] ?? ''}（データ管理の操作履歴とあわせて確認してください）`);
       else if (check.repairs.length) toast.info(`バックアップを作成しました。削除済みデータへの関連付けが残っていたため、復元時に解除されます（${check.repairs.length}種類）`);
     }
@@ -105,7 +168,7 @@ export function DataPage() {
                   ? `資産台帳CSV（${data.assets.length}台）`
                   : kind === 'documents'
                     ? `書類一覧CSV（${data.documents.filter((d) => !d.deletedAt).length}件）`
-                    : `JSONバックアップ${includeFiles && data.documents.some((d) => d.file) ? '（書類の元ファイルを含む）' : ''}`;
+                    : `JSONバックアップ${encrypt ? '（暗号化）' : ''}${includeFiles && data.documents.some((d) => d.file) ? '（書類の元ファイルを含む）' : ''}`;
     await run((s) => s.recordExport(`${label}を出力しました`), `${label}を出力しました`).catch(() => undefined);
   };
 
@@ -118,26 +181,55 @@ export function DataPage() {
     }
     try {
       const text = await file.text();
-      const r = parseBackupText(text);
-      if (!r.ok) {
-        setRestoreErrors(r.errors);
-        toast.error('バックアップファイルの検証に失敗しました');
+      if (isEncryptedBackupText(text)) {
+        // 暗号化されたバックアップは、パスワードを聞いて復号してから同じ検証にかける
+        setDecryptPassword('');
+        setDecryptError('');
+        setEncryptedFile({ text, fileName: file.name });
         return;
       }
-      // 元ファイルは復元前にハッシュを検証する (破損したファイルを書類に結び付けない)
-      const decoded = await decodeBackupFiles(r.backup);
-      if (!decoded.ok) {
-        setRestoreErrors(decoded.errors);
-        toast.error('バックアップ内の元ファイルの検証に失敗しました');
-        return;
-      }
-      const included = new Set(decoded.files.map((f) => f.id));
-      const missingFiles = r.backup.data.documents.filter((d) => d.file && !included.has(d.file.fileId)).length;
-      setRestoreCandidate({ backup: r.backup, counts: r.counts, fileName: file.name, files: decoded.files, missingFiles, repairs: r.repairs });
+      await validateText(text, file.name);
     } catch {
       setRestoreErrors(['ファイルを読み込めませんでした']);
     } finally {
       if (fileRef.current) fileRef.current.value = '';
+    }
+  };
+
+  const validateText = async (text: string, fileName: string) => {
+    const r = parseBackupText(text);
+    if (!r.ok) {
+      setRestoreErrors(r.errors);
+      toast.error('バックアップファイルの検証に失敗しました');
+      return;
+    }
+    // 元ファイルは復元前にハッシュを検証する (破損したファイルを書類に結び付けない)
+    const decoded = await decodeBackupFiles(r.backup);
+    if (!decoded.ok) {
+      setRestoreErrors(decoded.errors);
+      toast.error('バックアップ内の元ファイルの検証に失敗しました');
+      return;
+    }
+    const included = new Set(decoded.files.map((f) => f.id));
+    const missingFiles = r.backup.data.documents.filter((d) => d.file && !included.has(d.file.fileId)).length;
+    setRestoreCandidate({ backup: r.backup, counts: r.counts, fileName, files: decoded.files, missingFiles, repairs: r.repairs });
+  };
+
+  const submitDecrypt = async () => {
+    if (!encryptedFile) return;
+    setDecrypting(true);
+    setDecryptError('');
+    try {
+      const r = await decryptBackupText(encryptedFile.text, decryptPassword);
+      if (!r.ok) {
+        setDecryptError(r.error);
+        return;
+      }
+      const fileName = encryptedFile.fileName;
+      setEncryptedFile(null);
+      await validateText(r.text, fileName);
+    } finally {
+      setDecrypting(false);
     }
   };
 
@@ -177,13 +269,36 @@ export function DataPage() {
             <Button variant="secondary" icon={FileSpreadsheet} onClick={() => exportFile('documents')} className="justify-start" data-testid="export-documents">
               書類一覧をCSV出力（{data.documents.filter((d) => !d.deletedAt).length}件）
             </Button>
-            <Button variant="secondary" icon={FileJson} onClick={() => exportFile('json')} className="justify-start" data-testid="export-json">
-              全データをJSONバックアップ
+            <Button variant="secondary" icon={FileJson} onClick={() => exportFile('json')} className="justify-start" loading={exporting} data-testid="export-json">
+              全データをJSONバックアップ{encrypt && '（暗号化）'}
             </Button>
             <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm">
               <input type="checkbox" className="size-5 accent-navy-700" checked={includeFiles} onChange={(e) => setIncludeFiles(e.target.checked)} data-testid="backup-include-files" />
               書類の元ファイル（画像・PDF）も含める{fileBytes !== null && `（約${formatBytes(Math.round(fileBytes * 1.34))}）`}
             </label>
+            <label className="flex min-h-11 cursor-pointer items-center gap-2 text-sm">
+              <input type="checkbox" className="size-5 accent-navy-700" checked={encrypt} onChange={(e) => setEncrypt(e.target.checked)} data-testid="backup-encrypt" />
+              <Lock className="size-4 text-slate-500" aria-hidden />
+              パスワードで暗号化する（住所・電話番号などを含むため、持ち出す場合に推奨）
+            </label>
+            {encrypt && (
+              <div className="grid gap-2 rounded-lg border border-slate-200 p-3 dark:border-navy-700">
+                <TextField
+                  label="パスワード"
+                  type="password"
+                  autoComplete="new-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  hint={`${MIN_PASSWORD_LENGTH}文字以上`}
+                  data-testid="backup-password"
+                />
+                <TextField label="パスワード（確認）" type="password" autoComplete="new-password" value={password2} onChange={(e) => setPassword2(e.target.value)} data-testid="backup-password2" />
+                <p className="text-xs font-semibold text-red-700 dark:text-red-300">
+                  パスワードを忘れると、このバックアップは誰にも（開発者にも）復元できません。パスワードはバックアップとは別の安全な場所に控えてください。
+                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">ブラウザ内で暗号化します（AES-GCM・256ビット）。パスワードやデータは外部に送信しません。ファイル名・作成日時・大きさは暗号化されません。</p>
+              </div>
+            )}
             <div className="rounded-lg bg-slate-50 p-2 dark:bg-navy-950">
               <p className="mb-1 text-xs font-semibold text-slate-600 dark:text-slate-300">この端末の保存容量</p>
               <StorageMeter />
@@ -222,7 +337,7 @@ export function DataPage() {
             )}
             <p className="flex items-start gap-1.5 text-xs text-slate-500 dark:text-slate-400">
               <ShieldCheck className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-              不正な形式・壊れたファイルは読み込まれず、現在のデータは変更されません。
+              不正な形式・壊れたファイルは読み込まれず、現在のデータは変更されません。暗号化したバックアップは、選択後にパスワードを入力します。
             </p>
           </div>
         </Card>
@@ -276,6 +391,88 @@ export function DataPage() {
               <dd className="text-lg font-bold tabular-nums text-slate-800 dark:text-slate-100">{service.today()}</dd>
             </div>
           </dl>
+        </Card>
+
+        <Card>
+          <CardHeader title="直前のデータに戻す" icon={RotateCcw} description="復元・初期化・全削除の直前のデータを、この端末に1世代だけ自動で退避しています" />
+          <div className="space-y-2 p-4 sm:p-5" data-testid="safety-card">
+            {safetyInfo ? (
+              <>
+                <p className="text-sm">
+                  {formatDateTimeJa(safetyInfo.at)}の「{safetyInfo.reason}」の直前のデータ
+                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  社員{safetyInfo.counts.employees}名・タスク{safetyInfo.counts.tasks}件・問い合わせ{safetyInfo.counts.inquiries}件・品目{safetyInfo.counts.items}件・書類{safetyInfo.counts.documents}件
+                </p>
+                <Button variant="secondary" icon={RotateCcw} onClick={() => setConfirmSafety(true)} data-testid="safety-restore">
+                  このデータに戻す
+                </Button>
+              </>
+            ) : (
+              <p className="text-sm text-slate-500 dark:text-slate-400" data-testid="safety-empty">
+                まだ退避したデータはありません。
+              </p>
+            )}
+            <p className="text-xs text-slate-500 dark:text-slate-400">端末の故障・紛失・ブラウザのデータ削除では一緒に失われます。定期的に JSON バックアップも保存してください。</p>
+          </div>
+        </Card>
+
+        <Card>
+          <CardHeader title="データの点検と保護" icon={SearchCheck} description="保存されているデータの整合性の確認と、ブラウザによる自動削除からの保護" />
+          <div className="space-y-3 p-4 sm:p-5">
+            <Button variant="secondary" icon={SearchCheck} onClick={runCheck} loading={checking} data-testid="integrity-check">
+              データを点検する
+            </Button>
+            {integrity && (
+              <div className="rounded-lg bg-slate-50 p-3 text-sm dark:bg-navy-950" data-testid="integrity-result" role="status">
+                {integrity.errors.length === 0 && integrity.repairs.length === 0 && <p className="font-semibold text-emerald-700 dark:text-emerald-300">問題は見つかりませんでした。バックアップから正しく復元できる状態です。</p>}
+                {integrity.repairs.length > 0 && (
+                  <>
+                    <p className="font-semibold text-amber-800 dark:text-amber-200">削除済みのデータを指したままの関連付けがあります（業務データは消えていません）</p>
+                    <ul className="mt-1 list-disc pl-5 text-xs">
+                      {integrity.repairs.map((r) => (
+                        <li key={r}>{r}</li>
+                      ))}
+                    </ul>
+                    <Button
+                      size="sm"
+                      className="mt-2"
+                      data-testid="integrity-repair"
+                      onClick={() =>
+                        run((s) => s.repairIntegrity(), (r) => `関連付けを修復しました（${r.length}種類）`)
+                          .then(runCheck)
+                          .catch(() => undefined)
+                      }
+                    >
+                      関連付けを解除して修復する
+                    </Button>
+                  </>
+                )}
+                {integrity.errors.length > 0 && (
+                  <>
+                    <p className="font-semibold text-red-700 dark:text-red-300">自動では直せない問題があります。JSON バックアップを保存したうえで、開発者に相談してください</p>
+                    <ul className="mt-1 list-disc pl-5 text-xs">
+                      {integrity.errors.map((r) => (
+                        <li key={r}>{r}</li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </div>
+            )}
+            <div className="rounded-lg bg-slate-50 p-3 text-sm dark:bg-navy-950" data-testid="persist-status">
+              <p>
+                ブラウザによる自動削除からの保護：
+                <strong>{persisted === null ? '確認できません' : persisted ? '有効' : '無効'}</strong>
+              </p>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">無効の場合、端末の空き容量が少なくなるとブラウザがデータを削除することがあります（特に iPhone の Safari は、長期間開かないサイトのデータを削除します）。</p>
+              {persisted === false && (
+                <Button variant="secondary" size="sm" className="mt-2" onClick={requestPersist} data-testid="persist-request">
+                  保護を有効にする
+                </Button>
+              )}
+            </div>
+          </div>
         </Card>
       </div>
 
@@ -346,7 +543,7 @@ export function DataPage() {
                   </ul>
                 </div>
               )}
-              <p className="mt-2 text-xs">必要に応じて、先に現在のデータをバックアップしてください。</p>
+              <p className="mt-2 text-xs">上書きの直前に、現在のデータをこの端末に自動で退避します。復元後に「直前のデータに戻す」で元に戻せます。</p>
             </>
           )
         }
@@ -354,11 +551,63 @@ export function DataPage() {
         onClose={() => setRestoreCandidate(null)}
       />
       <ConfirmDialog
+        open={confirmSafety}
+        danger
+        title="直前のデータに戻しますか？"
+        confirmLabel="このデータに戻す"
+        message={
+          safetyInfo && (
+            <>
+              <p>
+                現在のデータを、{formatDateTimeJa(safetyInfo.at)}の「{safetyInfo.reason}」の直前の状態（社員{safetyInfo.counts.employees}名・タスク{safetyInfo.counts.tasks}件など）で置き換えます。
+              </p>
+              <p className="mt-2 text-xs">現在のデータは代わりに退避されるため、もう一度この操作をすると今の状態に戻せます。</p>
+            </>
+          )
+        }
+        onConfirm={() => run((s) => s.restoreSafetySnapshot(), '直前のデータに戻しました')}
+        onClose={() => setConfirmSafety(false)}
+      />
+      <Modal
+        open={!!encryptedFile}
+        onClose={() => setEncryptedFile(null)}
+        title="暗号化されたバックアップ"
+        description={encryptedFile ? `「${encryptedFile.fileName}」を復号するパスワードを入力してください` : undefined}
+        footer={
+          <>
+            <ModalCancelButton disabled={decrypting} />
+            <Button type="submit" form="decrypt-form" icon={Lock} loading={decrypting} data-testid="decrypt-submit">
+              復号して内容を確認
+            </Button>
+          </>
+        }
+      >
+        <form
+          id="decrypt-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void submitDecrypt();
+          }}
+        >
+          <TextField
+            label="パスワード"
+            type="password"
+            autoComplete="current-password"
+            value={decryptPassword}
+            onChange={(e) => setDecryptPassword(e.target.value)}
+            error={decryptError || undefined}
+            hint="復号した内容を確認してから、上書きするかを選べます（まだデータは変更しません）"
+            data-testid="decrypt-password"
+            autoFocus
+          />
+        </form>
+      </Modal>
+      <ConfirmDialog
         open={confirmReset}
         danger
         title="デモデータを初期化しますか？"
         confirmLabel="初期化する"
-        message="現在のデータ（社員・タスク・問い合わせ・FAQ・在庫・資産・発注・ルール・部署・操作履歴）をすべて削除し、デモデータを再生成します。"
+        message="現在のデータ（社員・タスク・問い合わせ・FAQ・在庫・資産・発注・ルール・部署・操作履歴）をすべて削除し、デモデータを再生成します。直前のデータは自動で退避され、「直前のデータに戻す」で元に戻せます。"
         onConfirm={() => run((s) => s.resetDemoData(), 'デモデータを初期化しました')}
         onClose={() => setConfirmReset(false)}
       />
@@ -367,7 +616,7 @@ export function DataPage() {
         danger
         title="社員・タスクを全削除しますか？"
         confirmLabel="全削除する"
-        message="社員・タスク・問い合わせ・FAQ・在庫・資産・発注・操作履歴をすべて削除します。部署・準備ルール・問い合わせカテゴリ・保管場所・仕入先は初期設定に戻ります。この操作は取り消せません。"
+        message="社員・タスク・問い合わせ・FAQ・在庫・資産・発注・操作履歴をすべて削除します。部署・準備ルール・問い合わせカテゴリ・保管場所・仕入先は初期設定に戻ります。直前のデータは自動で退避され、「直前のデータに戻す」で元に戻せます。"
         onConfirm={() => run((s) => s.clearBusinessData(), '社員・タスクを全削除しました')}
         onClose={() => setConfirmClear(false)}
       />

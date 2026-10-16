@@ -12,6 +12,7 @@ import { validateTask, type FieldErrors, type TaskInput } from '../domain/valida
 import { generateId } from '../domain/id';
 import { linkHref, linkLabel } from '../domain/taskLinks';
 import { AppError } from '../services/workcoreService';
+import { ConflictNotice } from '../ui/ConflictNotice';
 import { Modal, ModalCancelButton } from '../ui/Modal';
 import { AutoBadge } from '../ui/badges';
 import { Button, SelectField, TextAreaField, TextField, cx } from '../ui/primitives';
@@ -53,6 +54,28 @@ function fromPreset(p: RecurPreset, prev: Recurrence | null | undefined): Recurr
 const hasDetails = (f: TaskInput) =>
   !!(f.startDate || f.assignee || f.assigneeDepartmentId || f.employeeId || f.projectId || f.tags?.length || f.recurrence || f.dependsOn?.length || f.checklist?.length || f.description || f.parentTaskId);
 
+/** 既存のタスクをフォームの入力値にする */
+function taskToInput(task: Task): TaskInput {
+  return {
+    employeeId: task.employeeId,
+    title: task.title,
+    description: task.description,
+    assigneeDepartmentId: task.assigneeDepartmentId,
+    assignee: task.assignee,
+    priority: task.priority,
+    dueDate: task.dueDate,
+    status: task.status,
+    startDate: task.startDate ?? null,
+    projectId: task.projectId ?? null,
+    parentTaskId: task.parentTaskId ?? null,
+    tags: task.tags ?? [],
+    checklist: task.checklist ?? [],
+    recurrence: task.recurrence ?? null,
+    dependsOn: task.dependsOn ?? [],
+    links: task.links ?? [],
+  };
+}
+
 export function TaskFormModal({
   open,
   onClose,
@@ -69,29 +92,12 @@ export function TaskFormModal({
   defaults?: Partial<TaskInput>;
   onSaved?: (t: Task) => void;
 }) {
-  const { data, run, empById } = useAppData();
+  const { data, run, reload, empById } = useAppData();
 
   const initial = useMemo<TaskInput>(
     () =>
       task
-        ? {
-            employeeId: task.employeeId,
-            title: task.title,
-            description: task.description,
-            assigneeDepartmentId: task.assigneeDepartmentId,
-            assignee: task.assignee,
-            priority: task.priority,
-            dueDate: task.dueDate,
-            status: task.status,
-            startDate: task.startDate ?? null,
-            projectId: task.projectId ?? null,
-            parentTaskId: task.parentTaskId ?? null,
-            tags: task.tags ?? [],
-            checklist: task.checklist ?? [],
-            recurrence: task.recurrence ?? null,
-            dependsOn: task.dependsOn ?? [],
-            links: task.links ?? [],
-          }
+        ? taskToInput(task)
         : {
             employeeId: defaultEmployeeId ?? null,
             title: '',
@@ -124,9 +130,14 @@ export function TaskFormModal({
   const [checkText, setCheckText] = useState('');
   const [subText, setSubText] = useState('');
   const { change: changeStatus, dialog: statusDialog } = useTaskStatusChange();
+  /** フォームを開いた時点の更新日時 (別のタブ・画面での変更を検出する) */
+  const [baseUpdatedAt, setBaseUpdatedAt] = useState<string | undefined>(undefined);
+  const [conflict, setConflict] = useState(false);
 
   useEffect(() => {
     if (open) {
+      setBaseUpdatedAt(task?.updatedAt);
+      setConflict(false);
       setForm(initial);
       setErrors({});
       setDetailsOpen(hasDetails(initial));
@@ -169,6 +180,10 @@ export function TaskFormModal({
 
   const submit = async (ev: FormEvent) => {
     ev.preventDefault();
+    await save(baseUpdatedAt);
+  };
+
+  const save = async (expectedUpdatedAt: string | undefined) => {
     if (tagText.trim()) addTag(tagText);
     const input: TaskInput = { ...form, tags: tagText.trim() ? [...new Set([...(form.tags ?? []), ...tagText.split(/[,、\s]+/).filter(Boolean)])] : form.tags };
     const v = validateTask(input, { employeeIds: data.employees.map((e) => e.id), departmentIds: data.departments.map((d) => d.id), projectIds: data.projects.map((p) => p.id), tasks: data.tasks, selfId: task?.id });
@@ -179,11 +194,14 @@ export function TaskFormModal({
     }
     setSaving(true);
     try {
-      const saved = await run((s) => (task ? s.updateTask(task.id, input) : s.createTask(input)), task ? 'タスクを更新しました' : 'タスクを作成しました');
+      const saved = await run((s) => (task ? s.updateTask(task.id, input, { expectedUpdatedAt }) : s.createTask(input)), task ? 'タスクを更新しました' : 'タスクを作成しました');
       onClose();
       onSaved?.(saved);
     } catch (e) {
-      if (e instanceof AppError) {
+      if (e instanceof AppError && e.code === 'conflict') {
+        await reload();
+        setConflict(true);
+      } else if (e instanceof AppError) {
         setErrors(e.fieldErrors as FieldErrors<TaskInput>);
         setDetailsOpen(true);
       }
@@ -219,6 +237,19 @@ export function TaskFormModal({
     } catch {
       /* トースト表示済み */
     }
+  };
+
+  const latest = task ? data.tasks.find((t) => t.id === task.id) : undefined;
+  const loadLatest = () => {
+    if (!latest) return;
+    setForm(taskToInput(latest));
+    setBaseUpdatedAt(latest.updatedAt);
+    setConflict(false);
+    setErrors({});
+  };
+  const overwrite = () => {
+    setConflict(false);
+    void save(latest?.updatedAt);
   };
 
   const linked = task?.employeeId ? empById.get(task.employeeId) : undefined;
@@ -257,6 +288,7 @@ export function TaskFormModal({
             <AutoBadge />
           </div>
         )}
+        {conflict && <ConflictNotice label="タスク" onLoadLatest={loadLatest} onOverwrite={overwrite} busy={saving} />}
         <form id="task-form" onSubmit={submit} noValidate className="grid grid-cols-2 gap-3 sm:gap-4">
           <TextField label="タスク名" required value={form.title} onChange={(e) => set('title', e.target.value)} error={errors.title} wrapClassName="col-span-2" maxLength={100} autoComplete="off" />
           <div className="col-span-2 sm:col-span-1">

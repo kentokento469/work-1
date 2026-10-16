@@ -8,6 +8,14 @@
  *  v3 (Phase 3): 在庫・IT資産・購買・自動化履歴のストアを追加。保管場所・仕入先 (架空) の初期マスタを投入
  *  v4 (Phase 4): documents (書類・抽出結果), documentFiles (元ファイル本体) を追加
  *  v5 (Phase 5): settings (自動化ルールの設定など、アプリの設定値) を追加
+ *  v6 (Phase 7): projects を追加
+ *
+ * 移行の方針 (Phase 9 で体系化):
+ *  - 版の検出: IndexedDB の版番号。より新しい版のデータを古いアプリで開くと VersionError (起動画面で再読み込みを案内)
+ *  - 段階的な移行: v1→v2→…→最新 を順に適用する。各段階は既存のレコードを消さず、追加・補完だけを行う
+ *  - 失敗時の中断: 版の更新は1つのトランザクションで、途中で失敗すると全体が取り消され旧版のまま残る (部分的に移行しない)
+ *  - 再実行: 次回の起動で最初から移行をやり直す
+ *  - 移行後の検証: 最初の起動時に整合性を点検し、結果を操作履歴に残す (WorkCoreService.verifyMigration)
  */
 import { openDB, type DBSchema, type IDBPDatabase, type IDBPTransaction, type StoreNames } from 'idb';
 import { createDefaultInquiryCategories } from '../domain/helpdesk/defaults';
@@ -31,6 +39,8 @@ import type { DocumentFile, DocumentRecord } from '../domain/documents/types';
 import type { Project, SettingRecord } from '../domain/types';
 
 export const DB_NAME = 'workcore';
+/** 移行後の点検が済んでいないことを示す meta のキー */
+export const MIGRATION_CHECK_KEY = 'pendingMigrationCheck';
 export const DB_VERSION = 6;
 
 export interface WorkCoreSchema extends DBSchema {
@@ -191,6 +201,8 @@ export function openWorkCoreDB(name = DB_NAME, version = DB_VERSION): Promise<Wo
       if (oldVersion < 4 && version >= 4) await migrateToV4(db, tx);
       if (oldVersion < 5 && version >= 5) await migrateToV5(db, tx);
       if (oldVersion < 6 && version >= 6) await migrateToV6(db, tx);
+      // 既存のデータを移行した場合は、起動後に整合性を点検する (Phase 9。点検は WorkCoreService.verifyMigration)
+      if (oldVersion > 0) await tx.objectStore('meta').put({ key: MIGRATION_CHECK_KEY, value: { from: oldVersion, to: version, at: new Date().toISOString() } });
     },
     blocked() {
       console.warn('WorkCore: 他のタブでデータベースが使用中です');
