@@ -4,6 +4,7 @@
  * - 関連する社員・タスク・FAQへ1タップで移動できる
  */
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { compareDue } from '../../domain/tasks';
 import { TargetNotices } from '../../ui/notices';
 import { BackLink } from '../../app/BackLink';
 import {
@@ -69,7 +70,7 @@ export function InquiryDetailPage({ inquiryId, query }: { inquiryId: string; que
     );
 
   const category = data.inquiryCategories.find((c) => c.id === inquiry.categoryId);
-  const tasks = data.tasks.filter((t) => t.inquiryId === inquiry.id).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  const tasks = data.tasks.filter((t) => t.inquiryId === inquiry.id).sort(compareDue);
   const openTasks = tasks.filter((t) => t.status !== 'done');
   const requester = inquiry.requesterId ? empById.get(inquiry.requesterId) : undefined;
   const overdue = isInquiryOverdue(inquiry, today);

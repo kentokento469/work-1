@@ -51,6 +51,7 @@ const COUNT_LABEL: Record<keyof DataSnapshot, string> = {
   automationRuns: '自動化の処理履歴',
   documents: '書類',
   settings: '設定',
+  projects: 'プロジェクト',
 };
 
 export function DataPage() {

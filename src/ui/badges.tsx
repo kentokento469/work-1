@@ -48,6 +48,12 @@ export function AutoBadge({ label = '自動生成' }: { label?: string }) {
 /** 期限表示。期限超過・間近を色とアイコンで強調する */
 export function DueDate({ task, today, className }: { task: Task; today: string; className?: string }) {
   const overdue = isTaskOverdue(task, today);
+  if (!task.dueDate)
+    return (
+      <span className={cx('inline-flex items-center gap-1 text-xs text-slate-400', className)} data-testid="no-due">
+        期限なし
+      </span>
+    );
   const days = diffDays(today, task.dueDate);
   const soon = task.status !== 'done' && !overdue && days <= 3;
   return (

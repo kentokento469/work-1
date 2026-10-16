@@ -2,6 +2,7 @@
  * 在庫の詳細画面: 品目詳細 / 資産詳細 / 発注書詳細 / 棚卸。
  */
 import { RelatedDocumentsCard } from '../../features/documents/light';
+import { RelatedTasksCard } from '../../features/tasks/RelatedTasksCard';
 import { TargetNotices } from '../../ui/notices';
 import { BackLink } from '../../app/BackLink';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
@@ -257,6 +258,7 @@ export function ItemDetailPage({ itemId }: { itemId: string }) {
         onConfirm={() => run((sv) => sv.inventory.removeItem(item.id), (r) => (r === 'deleted' ? '品目を削除しました' : '品目を無効にしました（履歴は保持）')).then((r) => r === 'deleted' && navigate('/inventory'))}
         onClose={() => setConfirmRemove(false)}
       />
+      <RelatedTasksCard link={{ kind: 'item', id: item.id }} suggestedTitle={`${item.name} の在庫確認`} description="棚卸し・補充・発注の準備など、この品目に関する作業をタスクにできます" />
     </>
   );
 }
@@ -583,6 +585,7 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
           ))}
         </ol>
       </Card>
+      <RelatedTasksCard link={{ kind: 'purchaseOrder', id: po.id }} suggestedTitle={`発注書 ${po.number} の対応`} description="承認・発注先への連絡・入荷確認など、発注に関する作業をタスクにできます（外部への発注は行いません）" />
     </>
   );
 }

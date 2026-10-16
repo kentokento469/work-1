@@ -1,4 +1,6 @@
 import { computeAllStock } from '../domain/inventory/stock';
+import { describeRecurrence } from '../domain/recurrence';
+import { compareDue } from '../domain/tasks';
 import { ASSET_STATUS_LABEL, INVENTORY_CATEGORY_LABEL, MOVEMENT_TYPE_LABEL } from '../domain/inventory/types';
 import { DOCUMENT_STATUS_LABEL, DOCUMENT_TYPE_LABEL, EXTRACTION_METHOD_LABEL, FIELD_DEFS, type DocumentRecord, type DocumentType } from '../domain/documents/types';
 import { EMPLOYEE_STATUS_LABEL, INQUIRY_STATUS_LABEL, PRIORITY_LABEL, TASK_STATUS_LABEL, type DataSnapshot } from '../domain/types';
@@ -43,29 +45,37 @@ export function employeesToCsv(data: Pick<DataSnapshot, 'employees' | 'departmen
   return toCsv(['社員番号', '氏名', '所属部署', '役職', '雇用区分', '入社日', '退職日', '在籍ステータス', '備考', '電話番号', 'メールアドレス', '郵便番号', '住所'], rows);
 }
 
-export function tasksToCsv(data: Pick<DataSnapshot, 'tasks' | 'employees' | 'departments'>): string {
+export function tasksToCsv(data: Pick<DataSnapshot, 'tasks' | 'employees' | 'departments'> & Partial<Pick<DataSnapshot, 'projects'>>): string {
+  const proj = new Map((data.projects ?? []).map((p) => [p.id, p.name]));
+  const title = new Map(data.tasks.map((t) => [t.id, t.title]));
   const dept = new Map(data.departments.map((d) => [d.id, d.name]));
   const emp = new Map(data.employees.map((e) => [e.id, e]));
   const rows = [...data.tasks]
-    .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
+    .sort(compareDue)
     .map((t) => {
       const e = t.employeeId ? emp.get(t.employeeId) : undefined;
       return [
         t.title,
         e ? e.employeeNumber : '',
         e ? e.name : '',
-        dept.get(t.assigneeDepartmentId) ?? '',
+        (t.assigneeDepartmentId && dept.get(t.assigneeDepartmentId)) ?? '',
         t.assignee,
         PRIORITY_LABEL[t.priority],
-        t.dueDate,
+        t.dueDate ?? '',
         TASK_STATUS_LABEL[t.status],
         t.source === 'onboarding' ? '入社準備(自動)' : t.source === 'inquiry' ? '問い合わせ' : t.source === 'automation' ? '自動化' : '手動',
         t.completedAt ?? '',
         t.description,
+        t.startDate ?? '',
+        (t.projectId && proj.get(t.projectId)) ?? '',
+        (t.tags ?? []).join(' '),
+        (t.parentTaskId && title.get(t.parentTaskId)) ?? '',
+        t.checklist?.length ? `${t.checklist.filter((c) => c.done).length}/${t.checklist.length}` : '',
+        t.recurrence ? describeRecurrence(t.recurrence) : '',
       ];
     });
   return toCsv(
-    ['タスク名', '対象社員番号', '対象社員', '担当部署', '担当者', '優先度', '期限', '進捗状況', '登録元', '完了日時', '詳細'],
+    ['タスク名', '対象社員番号', '対象社員', '担当部署', '担当者', '優先度', '期限', '進捗状況', '登録元', '完了日時', '詳細', '開始日', 'プロジェクト', 'タグ', '親タスク', 'チェックリスト', '繰り返し'],
     rows,
   );
 }

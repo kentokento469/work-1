@@ -1,4 +1,5 @@
 import { formatAddress } from '../ui/SmartInputs';
+import { compareDue } from '../domain/tasks';
 import { TargetNotices } from '../ui/notices';
 import { BackLink } from '../app/BackLink';
 import { useState } from 'react';
@@ -40,7 +41,7 @@ export function EmployeeDetailPage({ employeeId }: { employeeId: string }) {
 
   const tasks = data.tasks
     .filter((t) => t.employeeId === emp.id)
-    .sort((a, b) => (a.status === 'done' ? 1 : 0) - (b.status === 'done' ? 1 : 0) || a.dueDate.localeCompare(b.dueDate));
+    .sort((a, b) => (a.status === 'done' ? 1 : 0) - (b.status === 'done' ? 1 : 0) || compareDue(a, b));
   const inquiries = data.inquiries.filter((i) => i.requesterId === emp.id);
   const done = tasks.filter((t) => t.status === 'done').length;
   const pct = tasks.length ? Math.round((done / tasks.length) * 100) : 0;

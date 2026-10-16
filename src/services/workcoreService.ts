@@ -8,21 +8,22 @@ import { buildOnboardingPlan, materializePlan, type OnboardingPlan, type PlanIte
 import { NOTICE_SETTING_ID, markNoticesRead, readNoticeState, syncNoticeLog, type AppNotice } from '../domain/notifications';
 import { today as todayISO } from '../domain/date';
 import { generateId, nowISO } from '../domain/id';
-import { cleanContact, normalizeEmployeeNumber, validateEmployee, validateRule, validateTask, type EmployeeInput, type RuleInput, type TaskInput } from '../domain/validation';
-import { TASK_STATUS_LABEL, type DataSnapshot, type Department, type Employee, type OnboardingRule, type Task, type TaskStatus } from '../domain/types';
+import { cleanContact, normalizeEmployeeNumber, validateEmployee, validateRule, type EmployeeInput, type RuleInput, type TaskInput } from '../domain/validation';
+import { type DataSnapshot, type Department, type Employee, type OnboardingRule, type Task, type TaskStatus } from '../domain/types';
 import type { BackupFile } from '../data/backup';
 import { DATA_STORES, STORE_NAMES, type WorkCoreDB } from '../data/db';
 import { emptyInventory } from '../domain/inventory/defaults';
 import { InventoryService } from './inventoryService';
 import { createDemoData, createHelpdeskDemoData } from '../demo/demoData';
 import { createDefaultInquiryCategories } from '../domain/helpdesk/defaults';
-import { AppError, abortWith, appendInquiryEvent, fieldError, inquiryEvent, logActivity, type WriteTx } from './common';
+import { AppError, abortWith, fieldError, logActivity, type WriteTx } from './common';
 import { HelpdeskService } from './helpdeskService';
 import { ALL_AUTOMATIONS } from '../automation/registry';
 import { pendingProposals } from '../automation/engine';
 import { AUTOMATION_SETTING_ID, readAutomationSettings, ruleSetting, type RuleSetting } from '../automation/settings';
 import { computeAllStock } from '../domain/inventory/stock';
 import { DocumentService } from './documentService';
+import { TaskService, type DeletedTask } from './taskService';
 import type { DocumentFile } from '../domain/documents/types';
 
 export { AppError } from './common';
@@ -39,11 +40,13 @@ export class WorkCoreService {
   readonly helpdesk: HelpdeskService;
   readonly inventory: InventoryService;
   readonly documents: DocumentService;
+  readonly tasks: TaskService;
 
   constructor(private readonly db: WorkCoreDB, private readonly clock: () => string = todayISO) {
     this.helpdesk = new HelpdeskService(db, clock);
     this.inventory = new InventoryService(db, clock);
     this.documents = new DocumentService(db, clock, this.inventory);
+    this.tasks = new TaskService(db, clock);
   }
 
   today(): string {
@@ -177,109 +180,22 @@ export class WorkCoreService {
     await tx.done;
   }
 
-  // ---------- タスク ----------
+  // ---------- タスク (Phase 7 から TaskService に集約。従来の呼び出し口は互換のため残す) ----------
 
-  private async taskContext(tx: WriteTx) {
-    const [emps, depts] = await Promise.all([tx.objectStore('employees').getAllKeys(), tx.objectStore('departments').getAllKeys()]);
-    return { employeeIds: emps, departmentIds: depts };
+  createTask(input: TaskInput): Promise<Task> {
+    return this.tasks.createTask(input);
   }
-
-  async createTask(input: TaskInput): Promise<Task> {
-    const tx = this.db.transaction(['tasks', 'employees', 'departments', 'activities'], 'readwrite');
-    const v = validateTask(input, await this.taskContext(tx));
-    if (!v.ok) return abortWith(tx, fieldError(v.errors));
-    const now = nowISO();
-    const task: Task = {
-      ...input,
-      id: generateId('task'),
-      title: input.title.trim(),
-      assignee: input.assignee.trim(),
-      description: input.description.trim(),
-      source: 'manual',
-      ruleId: null,
-      inquiryId: null,
-      createdAt: now,
-      updatedAt: now,
-      completedAt: input.status === 'done' ? now : null,
-    };
-    await tx.objectStore('tasks').add(task);
-    await logActivity(tx, 'task', 'create', `タスク「${task.title}」を作成しました`, task.id);
-    await tx.done;
-    return task;
+  updateTask(id: string, input: TaskInput): Promise<Task> {
+    return this.tasks.updateTask(id, input);
   }
-
-  /** 問い合わせ由来のタスクの状態変化を、問い合わせの対応履歴にも残す */
-  private async reflectToInquiry(tx: WriteTx, before: Task, after: Task) {
-    if (!after.inquiryId || before.status === after.status) return;
-    await appendInquiryEvent(tx, after.inquiryId, inquiryEvent('task', `タスク「${after.title}」が「${TASK_STATUS_LABEL[after.status]}」になりました`));
+  setTaskStatus(id: string, status: TaskStatus, opts?: { completeSubtasks?: boolean }) {
+    return this.tasks.setTaskStatus(id, status, opts);
   }
-
-  async updateTask(id: string, input: TaskInput): Promise<Task> {
-    const tx = this.db.transaction(['tasks', 'employees', 'departments', 'activities', 'inquiries'], 'readwrite');
-    const current = await tx.objectStore('tasks').get(id);
-    if (!current) return abortWith(tx, '対象のタスクが見つかりません');
-    const v = validateTask(input, await this.taskContext(tx));
-    if (!v.ok) return abortWith(tx, fieldError(v.errors));
-    const now = nowISO();
-    const task: Task = {
-      ...current,
-      ...input,
-      title: input.title.trim(),
-      assignee: input.assignee.trim(),
-      description: input.description.trim(),
-      updatedAt: now,
-      completedAt: input.status === 'done' ? (current.completedAt ?? now) : null,
-    };
-    await tx.objectStore('tasks').put(task);
-    await this.reflectToInquiry(tx, current, task);
-    const statusChanged = current.status !== task.status;
-    await logActivity(
-      tx,
-      'task',
-      'update',
-      statusChanged ? `タスク「${task.title}」を「${TASK_STATUS_LABEL[task.status]}」に変更しました` : `タスク「${task.title}」を更新しました`,
-      id,
-    );
-    await tx.done;
-    return task;
+  deleteTask(id: string): Promise<DeletedTask> {
+    return this.tasks.deleteTask(id);
   }
-
-  /** ステータス変更。戻り値の previous は Undo 用 */
-  async setTaskStatus(id: string, status: TaskStatus): Promise<Task & { previousStatus: TaskStatus }> {
-    const tx = this.db.transaction(['tasks', 'activities', 'inquiries'], 'readwrite');
-    const current = await tx.objectStore('tasks').get(id);
-    if (!current) return abortWith(tx, '対象のタスクが見つかりません');
-    const now = nowISO();
-    const task: Task = { ...current, status, updatedAt: now, completedAt: status === 'done' ? (current.completedAt ?? now) : null };
-    await tx.objectStore('tasks').put(task);
-    await this.reflectToInquiry(tx, current, task);
-    await logActivity(tx, 'task', 'status', `タスク「${task.title}」を「${TASK_STATUS_LABEL[status]}」に変更しました`, id);
-    await tx.done;
-    return { ...task, previousStatus: current.status };
-  }
-
-  /** 削除したタスクを返す (Undo 用) */
-  async deleteTask(id: string): Promise<Task> {
-    const tx = this.db.transaction(['tasks', 'activities', 'inquiries'], 'readwrite');
-    const current = await tx.objectStore('tasks').get(id);
-    if (!current) return abortWith(tx, '対象のタスクが見つかりません');
-    await tx.objectStore('tasks').delete(id);
-    if (current.inquiryId) await appendInquiryEvent(tx, current.inquiryId, inquiryEvent('task', `タスク「${current.title}」を削除しました`));
-    await logActivity(tx, 'task', 'delete', `タスク「${current.title}」を削除しました`, id);
-    await tx.done;
-    return current;
-  }
-
-  async restoreTask(task: Task): Promise<void> {
-    const tx = this.db.transaction(['tasks', 'employees', 'inquiries', 'activities'], 'readwrite');
-    if (await tx.objectStore('tasks').get(task.id)) return abortWith(tx, 'このタスクは既に存在します');
-    // 紐付け先が消えていたら紐付けを外して復元する
-    const employeeId = task.employeeId && (await tx.objectStore('employees').get(task.employeeId)) ? task.employeeId : null;
-    const inquiryId = task.inquiryId && (await tx.objectStore('inquiries').get(task.inquiryId)) ? task.inquiryId : null;
-    await tx.objectStore('tasks').put({ ...task, employeeId, inquiryId });
-    if (inquiryId) await appendInquiryEvent(tx, inquiryId, inquiryEvent('task', `タスク「${task.title}」の削除を取り消しました`));
-    await logActivity(tx, 'task', 'restore', `タスク「${task.title}」の削除を取り消しました`, task.id);
-    await tx.done;
+  restoreTask(task: DeletedTask): Promise<void> {
+    return this.tasks.restoreTask(task);
   }
 
   // ---------- 入社準備自動化 ----------
@@ -477,6 +393,7 @@ export class WorkCoreService {
     await this.replaceAll(
       {
         ...emptyInventory(true),
+        projects: [],
         documents: [],
         settings,
         departments: demo.departments,

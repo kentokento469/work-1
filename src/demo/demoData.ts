@@ -19,6 +19,7 @@ import { createInventoryDemo } from './inventoryDemo';
 
 export { createHelpdeskDemoData } from './helpdeskDemo';
 import type {
+  Project,
   ActivityLog,
   DataSnapshot,
   Department,
@@ -172,11 +173,11 @@ export function createDemoData(today: ISODate): DataSnapshot {
     const plan = buildOnboardingPlan({ employee: e, rules, existingTasks: tasks, departments, today: addDays(today, -30) });
     materializePlan(plan, {}, ts).forEach((t, i) => tasks.push({ ...t, ...progress(t, i) }));
   };
-  const done = (t: Task): Partial<Task> => ({ status: 'done', completedAt: new Date(`${addDays(t.dueDate, -1)}T10:00:00`).toISOString() });
+  const done = (t: Task): Partial<Task> => ({ status: 'done', completedAt: new Date(`${addDays(t.dueDate!, -1)}T10:00:00`).toISOString() });
 
   // 森さん(4日後入社): 大半完了、一部期限超過
   generate('A0101', (t) => {
-    if (t.dueDate < today && ['PC準備', 'Microsoftアカウント準備', '入社書類確認'].includes(t.title)) return done(t);
+    if (t.dueDate! < today && ['PC準備', 'Microsoftアカウント準備', '入社書類確認'].includes(t.title)) return done(t);
     if (t.title === 'GitHubアカウント招待') return { status: 'in_progress' };
     return {};
   });
@@ -255,8 +256,26 @@ export function createDemoData(today: ISODate): DataSnapshot {
 
   const inventory = createInventoryDemo(today, employees);
 
+  // Phase 7: 一般のタスク (部署・社員なし)・プロジェクト・繰り返し・チェックリスト・依存関係の例
+  const project: Project = { id: 'prj_pc_replace', name: '社内PC入れ替え', description: '老朽化したPCを順次入れ替える（架空）', archived: false, createdAt: ts, updatedAt: ts };
+  const general = (id: string, title: string, extra: Partial<Task>): Task => ({
+    id, employeeId: null, title, description: '', assigneeDepartmentId: null, assignee: '', priority: 'medium', dueDate: null, status: 'todo', source: 'manual', ruleId: null, inquiryId: null, createdAt: ts, updatedAt: ts, completedAt: null, ...extra,
+  });
+  const lastOfMonth = (() => { const d = new Date(`${today}T00:00:00`); const e = new Date(d.getFullYear(), d.getMonth() + 1, 0); return `${e.getFullYear()}-${String(e.getMonth() + 1).padStart(2, '0')}-${String(e.getDate()).padStart(2, '0')}`; })();
+  tasks.push(
+    general('task_pc_select', '機器選定', { projectId: project.id, status: 'done', completedAt: ts, dueDate: addDays(today, -3), tags: ['IT'] }),
+    general('task_pc_quote', '見積取得', { projectId: project.id, status: 'in_progress', dueDate: addDays(today, 4), tags: ['IT'], dependsOn: ['task_pc_select'], checklist: [{ id: 'chk_q1', text: 'A社に依頼', done: true }, { id: 'chk_q2', text: 'B社に依頼', done: false }, { id: 'chk_q3', text: '比較表を作成', done: false }] }),
+    general('task_pc_apply', '購入申請', { projectId: project.id, dueDate: addDays(today, 10), dependsOn: ['task_pc_quote'] }),
+    general('task_pc_setup', '初期設定・データ移行', { projectId: project.id, dueDate: addDays(today, 20), dependsOn: ['task_pc_apply'] }),
+    general('task_pc_handover', '利用者への引き渡し', { projectId: project.id, dependsOn: ['task_pc_setup'] }),
+    general('task_expense', '経費の確認', { dueDate: lastOfMonth, tags: ['定期作業'], recurrence: { freq: 'monthly', interval: 1, monthDay: 'last' }, priority: 'high' }),
+    general('task_supplies', '備品を点検する', { dueDate: addDays(today, (8 - new Date(`${today}T00:00:00`).getDay()) % 7 || 7), tags: ['総務', '定期作業'], recurrence: { freq: 'weekly', interval: 1, weekdays: [1] } }),
+    general('task_meeting', '来週の会議資料を準備する', { tags: ['重要'] }),
+  );
+
   return {
     ...inventory,
+    projects: [project],
     documents: [],
     settings: [],
     departments,

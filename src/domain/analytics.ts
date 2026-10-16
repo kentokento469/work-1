@@ -10,11 +10,12 @@ export function isTaskOpen(t: Task): boolean {
 }
 
 export function isTaskOverdue(t: Task, todayISO: ISODate): boolean {
-  return isTaskOpen(t) && t.dueDate < todayISO;
+  // 期限なしのタスクは期限超過にしない
+  return isTaskOpen(t) && !!t.dueDate && t.dueDate < todayISO;
 }
 
 export function isTaskDueSoon(t: Task, todayISO: ISODate, days = 3): boolean {
-  if (!isTaskOpen(t) || t.dueDate < todayISO) return false;
+  if (!isTaskOpen(t) || !t.dueDate || t.dueDate < todayISO) return false;
   return diffDays(todayISO, t.dueDate) <= days;
 }
 
@@ -120,7 +121,7 @@ export function computeDashboard(data: DataSnapshot, todayISO: ISODate): Dashboa
   const attention: AttentionItem[] = [];
   const empName = (t: Task) => (t.employeeId ? empById.get(t.employeeId)?.name : undefined);
   for (const t of overdue) {
-    const days = diffDays(t.dueDate, todayISO);
+    const days = diffDays(t.dueDate!, todayISO);
     attention.push({
       kind: 'overdue',
       id: `o_${t.id}`,
@@ -131,7 +132,7 @@ export function computeDashboard(data: DataSnapshot, todayISO: ISODate): Dashboa
     });
   }
   for (const t of tasks.filter((x) => isTaskDueSoon(x, todayISO) && x.priority !== 'low')) {
-    const days = diffDays(todayISO, t.dueDate);
+    const days = diffDays(todayISO, t.dueDate!);
     attention.push({
       kind: 'due_soon',
       id: `s_${t.id}`,

@@ -11,6 +11,7 @@
  * 復元前に各ファイルの SHA-256 を計算し、書類に記録したハッシュと一致するかを検証する。
  */
 import { isValidISODate } from '../domain/date';
+import { validateRecurrence } from '../domain/recurrence';
 import { createDefaultInquiryCategories } from '../domain/helpdesk/defaults';
 import { emptyInventory } from '../domain/inventory/defaults';
 import { DOCUMENT_STATUSES, DOCUMENT_TYPES, EXTRACTION_METHODS, FIELD_KEYS, type DocumentFile } from '../domain/documents/types';
@@ -31,8 +32,8 @@ import {
 } from '../domain/types';
 
 export const BACKUP_APP_ID = 'WorkCore';
-export const BACKUP_SCHEMA_VERSION = 5;
-const SUPPORTED_VERSIONS = [1, 2, 3, 4, 5];
+export const BACKUP_SCHEMA_VERSION = 6;
+const SUPPORTED_VERSIONS = [1, 2, 3, 4, 5, 6];
 
 /** 書類の元ファイル (Base64)。バックアップに含めるかは出力時に選べる */
 export interface BackupDocumentFile {
@@ -139,10 +140,10 @@ function checkTask(v: unknown): v is Task {
     isStrOrNull(v.employeeId) &&
     isStr(v.title) &&
     isStr(v.description) &&
-    isStr(v.assigneeDepartmentId) &&
+    isStrOrNull(v.assigneeDepartmentId) &&
     isStr(v.assignee) &&
     isPriority(v.priority) &&
-    isValidISODate(v.dueDate) &&
+    (v.dueDate === null || isValidISODate(v.dueDate)) &&
     isTaskStatus(v.status) &&
     (v.source === 'manual' || v.source === 'onboarding' || v.source === 'inquiry' || v.source === 'automation') &&
     (v.assetId === undefined || isStrOrNull(v.assetId)) &&
@@ -150,7 +151,18 @@ function checkTask(v: unknown): v is Task {
     (v.inquiryId === undefined || isStrOrNull(v.inquiryId)) &&
     isStr(v.createdAt) &&
     isStr(v.updatedAt) &&
-    isStrOrNull(v.completedAt)
+    isStrOrNull(v.completedAt) &&
+    // Phase 7 の項目 (無い = 未設定)
+    (v.startDate === undefined || v.startDate === null || isValidISODate(v.startDate)) &&
+    (v.projectId === undefined || isStrOrNull(v.projectId)) &&
+    (v.parentTaskId === undefined || isStrOrNull(v.parentTaskId)) &&
+    (v.tags === undefined || isStrArr(v.tags)) &&
+    (v.checklist === undefined || (Array.isArray(v.checklist) && v.checklist.every((c) => isObj(c) && isStr(c.id) && isStr(c.text) && typeof c.done === 'boolean'))) &&
+    (v.recurrence === undefined || v.recurrence === null || validateRecurrence(v.recurrence) === null) &&
+    (v.seriesId === undefined || isStrOrNull(v.seriesId)) &&
+    (v.nextOccurrenceId === undefined || isStrOrNull(v.nextOccurrenceId)) &&
+    (v.dependsOn === undefined || isStrArr(v.dependsOn)) &&
+    (v.links === undefined || (Array.isArray(v.links) && v.links.every((l) => isObj(l) && isStr(l.kind) && isStr(l.id))))
   );
 }
 function checkRule(v: unknown): v is OnboardingRule {
@@ -307,6 +319,12 @@ export function validateBackup(raw: unknown): BackupValidation {
   if (version < 4) d.documents = [];
   // v1〜v4 → v5 の補完 (設定は既定値)
   if (version < 5) d.settings = [];
+  // v5 → v6 の補完 (Phase 7: プロジェクト。タスクの新しい項目は未設定として扱う)
+  if (version < 6) {
+    d.projects = [];
+    // プロジェクトが無かった版のデータに所属が残っていても参照切れにしない
+    if (Array.isArray(d.tasks)) d.tasks = d.tasks.map((t) => (isObj(t) && 'projectId' in t ? { ...t, projectId: null } : t));
+  }
 
   const collections = [
     ['departments', '部署', checkDepartment],
@@ -331,6 +349,7 @@ export function validateBackup(raw: unknown): BackupValidation {
     ['automationRuns', '自動化の処理履歴', checkRun],
     ['documents', '書類', checkDocument],
     ['settings', '設定', (v: unknown) => isObj(v) && isStr(v.id) && isStr(v.updatedAt) && 'value' in v],
+    ['projects', 'プロジェクト', (v: unknown) => isObj(v) && isStr(v.id) && isStr(v.name) && isStr(v.description) && typeof v.archived === 'boolean' && isStr(v.createdAt) && isStr(v.updatedAt)],
   ] as const;
 
   for (const [key, label, check] of collections) {
@@ -361,6 +380,8 @@ export function validateBackup(raw: unknown): BackupValidation {
   const empIds = new Set(data.employees.map((x) => x.id));
   const catIds = new Set(data.inquiryCategories.map((x) => x.id));
   const inqIds = new Set(data.inquiries.map((x) => x.id));
+  const projIds = new Set((data.projects ?? []).map((x) => x.id));
+  const taskIds = new Set(data.tasks.map((x) => x.id));
   const nums = new Set<string>();
   for (const e of data.employees) {
     if (!deptIds.has(e.departmentId)) errors.push(`社員「${e.name}」の所属部署が存在しません`);
@@ -370,8 +391,10 @@ export function validateBackup(raw: unknown): BackupValidation {
   }
   for (const t of data.tasks) {
     if (t.employeeId !== null && !empIds.has(t.employeeId)) errors.push(`タスク「${t.title}」の対象社員が存在しません`);
-    if (!deptIds.has(t.assigneeDepartmentId)) errors.push(`タスク「${t.title}」の担当部署が存在しません`);
+    if (t.assigneeDepartmentId && !deptIds.has(t.assigneeDepartmentId)) errors.push(`タスク「${t.title}」の担当部署が存在しません`);
     if (t.inquiryId !== null && !inqIds.has(t.inquiryId)) errors.push(`タスク「${t.title}」の生成元問い合わせが存在しません`);
+    if (t.projectId && !projIds.has(t.projectId)) errors.push(`タスク「${t.title}」のプロジェクトが存在しません`);
+    if (t.parentTaskId && !taskIds.has(t.parentTaskId)) errors.push(`タスク「${t.title}」の親タスクが存在しません`);
   }
   for (const r of data.rules) {
     if (r.scope !== 'common' && !deptIds.has(r.scope)) errors.push(`ルール「${r.title}」の適用部署が存在しません`);

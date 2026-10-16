@@ -28,10 +28,10 @@ import type {
 } from '../domain/inventory/types';
 import { createDefaultLocations, createDefaultSuppliers } from '../domain/inventory/defaults';
 import type { DocumentFile, DocumentRecord } from '../domain/documents/types';
-import type { SettingRecord } from '../domain/types';
+import type { Project, SettingRecord } from '../domain/types';
 
 export const DB_NAME = 'workcore';
-export const DB_VERSION = 5;
+export const DB_VERSION = 6;
 
 export interface WorkCoreSchema extends DBSchema {
   departments: { key: string; value: Department };
@@ -58,6 +58,7 @@ export interface WorkCoreSchema extends DBSchema {
   documents: { key: string; value: DocumentRecord; indexes: { byNumber: string } };
   documentFiles: { key: string; value: DocumentFile; indexes: { byDocument: string; byHash: string } };
   settings: { key: string; value: SettingRecord };
+  projects: { key: string; value: Project };
 }
 
 export type WorkCoreDB = IDBPDatabase<WorkCoreSchema>;
@@ -86,6 +87,7 @@ export const STORE_NAMES = [
   'documents',
   'documentFiles',
   'settings',
+  'projects',
 ] as const;
 
 /**
@@ -161,6 +163,12 @@ async function migrateToV5(db: IDBPDatabase<WorkCoreSchema>, tx: UpgradeTx) {
   await tx.objectStore('meta').put({ key: 'schemaMigratedToV5', value: new Date().toISOString() });
 }
 
+/** v5 → v6: タスクのプロジェクトのストアを追加 (既存タスクは変更しない。新しい項目は未設定として扱う) */
+async function migrateToV6(db: IDBPDatabase<WorkCoreSchema>, tx: UpgradeTx) {
+  db.createObjectStore('projects', { keyPath: 'id' });
+  await tx.objectStore('meta').put({ key: 'schemaMigratedToV6', value: new Date().toISOString() });
+}
+
 export function openWorkCoreDB(name = DB_NAME, version = DB_VERSION): Promise<WorkCoreDB> {
   return openDB<WorkCoreSchema>(name, version, {
     async upgrade(db, oldVersion, _newVersion, tx) {
@@ -182,6 +190,7 @@ export function openWorkCoreDB(name = DB_NAME, version = DB_VERSION): Promise<Wo
       if (oldVersion < 3 && version >= 3) await migrateToV3(db, tx);
       if (oldVersion < 4 && version >= 4) await migrateToV4(db, tx);
       if (oldVersion < 5 && version >= 5) await migrateToV5(db, tx);
+      if (oldVersion < 6 && version >= 6) await migrateToV6(db, tx);
     },
     blocked() {
       console.warn('WorkCore: 他のタブでデータベースが使用中です');

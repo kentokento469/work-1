@@ -107,6 +107,7 @@ const ATTENTION_LABEL: Record<AttentionKind, string> = {
 const CATEGORY_LABEL: Record<ActivityCategory, string> = {
   employee: '社員',
   task: 'タスク',
+  project: 'プロジェクト',
   onboarding: '自動化',
   rule: 'ルール',
   department: '部署',

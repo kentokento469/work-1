@@ -61,7 +61,7 @@ describe('computeDashboard', () => {
   });
 
   it('タスク0件でも完了率は0%', () => {
-    const s = computeDashboard({ ...emptyInventory(false), documents: [], settings: [], departments: [], employees: [], tasks: [], rules: [], activities: [], inquiries: [], faqs: [], inquiryCategories: [] }, TODAY);
+    const s = computeDashboard({ ...emptyInventory(false), documents: [], settings: [], projects: [], departments: [], employees: [], tasks: [], rules: [], activities: [], inquiries: [], faqs: [], inquiryCategories: [] }, TODAY);
     expect(s.completionRate).toBe(0);
   });
 });

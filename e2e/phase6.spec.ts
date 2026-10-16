@@ -53,7 +53,8 @@ test('[Phase6] A. タスクの件数＝要対応の一覧（原因を1件ずつ�
   const section = page.getByTestId('task-attention');
   await expect(section).toBeVisible();
   await expect(page.getByTestId('task-attention-count')).toHaveText(String(overdue.length));
-  if (overdue.length > 3) await page.getByTestId('task-attention-more').click();
+  // Phase 7 から要対応は普段閉じた1行で表示する
+  if (await page.getByTestId('task-attention-more').isVisible()) await page.getByTestId('task-attention-more').click();
   const titles = await section.locator('[data-testid="task-item"]').evaluateAll((els) => els.map((e) => e.getAttribute('data-task-title')));
   expect(titles.sort()).toEqual(overdue.map((t) => t.title).sort());
   // 各タスクに理由 (何日過ぎているか) が表示される

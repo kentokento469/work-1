@@ -98,11 +98,12 @@ export interface Task {
   employeeId: string | null;
   title: string;
   description: string;
-  /** 担当部署 (Department.id) */
-  assigneeDepartmentId: string;
+  /** 担当部署 (Department.id)。Phase 7 から任意 (一般のタスクは部署なしで登録できる)。自動生成タスクは従来どおり設定される */
+  assigneeDepartmentId: string | null;
   assignee: string;
   priority: Priority;
-  dueDate: ISODate;
+  /** 期限。Phase 7 から任意 (null = 期限なし。期限超過には数えない) */
+  dueDate: ISODate | null;
   status: TaskStatus;
   source: TaskSource;
   /** 自動生成元ルール。重複生成防止キーに使用 */
@@ -114,6 +115,62 @@ export interface Task {
   createdAt: ISODateTime;
   updatedAt: ISODateTime;
   completedAt: ISODateTime | null;
+  // ---- Phase 7 (すべて任意。旧データには存在しない = 未設定として扱う) ----
+  /** 開始日 */
+  startDate?: ISODate | null;
+  /** 所属プロジェクト (Project.id)。未所属の独立タスクも可 */
+  projectId?: string | null;
+  /** 親タスク (サブタスクの場合)。入れ子は1段まで */
+  parentTaskId?: string | null;
+  /** 自由なタグ */
+  tags?: string[];
+  /** 親タスク内の軽量なチェック項目 (担当・期限は持たない) */
+  checklist?: ChecklistItem[];
+  /** 繰り返し設定 (期限を基準に次回を作る) */
+  recurrence?: Recurrence | null;
+  /** 繰り返しの系列 ID (同じ繰り返しの過去・次回のタスクで共通) */
+  seriesId?: string | null;
+  /** 繰り返しの次回タスクを作成済みなら、その ID (二重生成の防止) */
+  nextOccurrenceId?: string | null;
+  /** 前提となるタスク (依存関係) */
+  dependsOn?: string[];
+  /** 関連データ (品目・発注書・書類など。元の画面へ戻るためのリンク) */
+  links?: TaskLink[];
+}
+
+export interface ChecklistItem {
+  id: string;
+  text: string;
+  done: boolean;
+}
+
+export type RecurrenceFreq = 'daily' | 'weekly' | 'monthly' | 'yearly';
+export interface Recurrence {
+  freq: RecurrenceFreq;
+  /** 間隔 (1 = 毎回、2 = 隔週など) */
+  interval: number;
+  /** 毎週の場合の曜日 (0=日〜6=土)。空なら期限と同じ曜日 */
+  weekdays?: number[];
+  /** 毎月の場合の日付。'last' = 月末。未指定なら期限と同じ日 (存在しない日は月末に寄せる) */
+  monthDay?: number | 'last';
+  /** 繰り返しを設定した時の期限 (月末・うるう年で寄せた日付が次回以降に影響しないよう、元の日を覚えておく) */
+  anchor?: ISODate;
+}
+
+export type TaskLinkKind = 'item' | 'purchaseOrder' | 'document' | 'asset' | 'inquiry' | 'employee';
+export interface TaskLink {
+  kind: TaskLinkKind;
+  id: string;
+}
+
+/** プロジェクト (タスクのまとまり)。削除してもタスクは消さず、所属だけ外す */
+export interface Project {
+  id: string;
+  name: string;
+  description: string;
+  archived: boolean;
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
 }
 
 /**
@@ -141,6 +198,7 @@ export interface OnboardingRule {
 export type ActivityCategory =
   | 'employee'
   | 'task'
+  | 'project'
   | 'onboarding'
   | 'rule'
   | 'department'
@@ -284,6 +342,8 @@ export interface DataSnapshot {
   documents: DocumentRecord[];
   // Phase 5: 設定値 (自動化ルールの有効/無効・実行方法など)
   settings: SettingRecord[];
+  /** Phase 7: タスクのプロジェクト */
+  projects: Project[];
 }
 
 /** アプリの設定値。id ごとに1件 (例: 'automation') */

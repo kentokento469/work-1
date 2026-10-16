@@ -160,7 +160,7 @@ export function deriveNotices({ data, today, stock, proposals, infoDays = 7 }: N
 
   // タスク: 期限超過
   for (const t of data.tasks) {
-    if (!isTaskOverdue(t, today)) continue;
+    if (!isTaskOverdue(t, today) || !t.dueDate) continue;
     const days = diffDays(t.dueDate, today);
     const who = t.employeeId ? `（${empName.get(t.employeeId) ?? '対象社員'}）` : '';
     add({

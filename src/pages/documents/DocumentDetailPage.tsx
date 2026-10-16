@@ -3,6 +3,7 @@
  * スマホでは「原本」「項目」を切り替え、PCでは左右に並べる。
  */
 import { useEffect, useState } from 'react';
+import { RelatedTasksCard } from '../../features/tasks/RelatedTasksCard';
 import { TargetNotices } from '../../ui/notices';
 import { BackLink } from '../../app/BackLink';
 import { Archive, Download, FileQuestion, FileText, History, Pencil, RotateCcw, ScanText, Trash2, Undo2 } from 'lucide-react';
@@ -224,6 +225,7 @@ function Detail({ doc, autoProcess, keepType, run }: { doc: DocumentRecord; auto
         }}
         onClose={() => setConfirmPurge(false)}
       />
+      {!doc.deletedAt && <RelatedTasksCard link={{ kind: 'document', id: doc.id }} suggestedTitle={`${doc.number} の対応`} defaults={{ employeeId: doc.employeeId ?? null }} description="確認・修正・提出準備・支払いなど、この書類に関する作業をタスクにできます" />}
     </>
   );
 }

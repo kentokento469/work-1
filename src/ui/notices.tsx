@@ -97,12 +97,15 @@ export function AttentionSection({
   limit = 3,
   testId = 'attention-section',
   children,
+  compact = false,
 }: {
   modules: NoticeModule[];
   title?: string;
   description?: string;
   limit?: number;
   testId?: string;
+  /** 閉じている間は1行だけ表示する (一覧を下へ押し出さない) */
+  compact?: boolean;
   /** 一覧の代わりに独自の表示 (例: タスクの行) を出す場合 */
   children?: (items: AppNotice[], expanded: boolean) => ReactNode;
 }) {
@@ -130,12 +133,12 @@ export function AttentionSection({
           通知センター
         </a>
       </div>
-      <p className="px-4 pt-0.5 text-[11px] text-slate-500 sm:px-5">{description ?? 'ナビの件数の内訳です。対応が終わると自動で消えます（読んだだけでは減りません）'}</p>
+      {!(compact && !expanded) && <p className="px-4 pt-0.5 text-[11px] text-slate-500 sm:px-5">{description ?? 'ナビの件数の内訳です。対応が終わると自動で消えます（読んだだけでは減りません）'}</p>}
       <div className="px-2 pb-2 sm:px-3">{children ? children(shown, expanded) : <ul className="divide-y divide-slate-100 dark:divide-navy-800">{shown.map((n) => <NoticeRow key={n.id} notice={n} showModule={modules.length > 1} />)}</ul>}</div>
       {items.length > limit && (
         <button type="button" onClick={() => setExpanded((v) => !v)} className="flex min-h-11 w-full items-center justify-center gap-1 border-t border-slate-100 text-xs font-semibold text-navy-600 dark:border-navy-800 dark:text-navy-300" aria-expanded={expanded} data-testid={`${testId}-more`}>
           <ChevronDown className={cx('size-4 transition-transform', expanded && 'rotate-180')} aria-hidden />
-          {expanded ? '先頭だけ表示' : `残り ${items.length - limit}件を表示`}
+          {expanded ? (limit === 0 ? '閉じる' : '先頭だけ表示') : limit === 0 ? `${items.length}件を表示` : `残り ${items.length - limit}件を表示`}
         </button>
       )}
     </section>
