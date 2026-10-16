@@ -212,3 +212,63 @@ test('[Migration] Phase 6 のデータ（タスク・社員・書類）を保持
   await page.getByTestId('quick-add-submit').click();
   await expect(page.locator('[data-task-title="移行後のタスク"]')).toBeVisible();
 });
+
+/** Phase 9: 移行後の自動点検 (v5 → v6) と、同じ版 (v6) のデータをそのまま使えること */
+const readAll = (page: import('@playwright/test').Page) =>
+  page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>((r) => {
+      const q = indexedDB.open('workcore');
+      q.onsuccess = () => r(q.result);
+    });
+    const all = <T,>(s: string) => (db.objectStoreNames.contains(s) ? new Promise<T[]>((r) => { const c = db.transaction(s).objectStore(s).getAll(); c.onsuccess = () => r(c.result as T[]); }) : Promise.resolve([] as T[]));
+    const v = { version: db.version, tasks: await all<{ id: string }>('tasks'), employees: (await all('employees')).length, documents: (await all('documents')).length, activities: (await all<{ message: string }>('activities')).map((a) => a.message), meta: (await all<{ key: string }>('meta')).map((m) => m.key) };
+    db.close();
+    return v;
+  });
+
+test('[Migration] Phase 6 のデータを Phase 9 で開く → v5 から v6 へ移行し、移行後の点検結果を操作履歴に残す', async ({ page }) => {
+  test.skip(!SITE, 'MIGRATION_SITE_URL が未設定のため skip');
+  await page.goto(`${SITE}/p6/#/tasks`);
+  await expect(page.getByRole('heading', { name: 'タスク管理' })).toBeVisible();
+  const before = await readAll(page);
+  expect(before.version).toBe(5);
+
+  await page.goto(`${SITE}/p9/#/data`);
+  await expect(page.getByRole('heading', { name: 'データ管理' })).toBeVisible();
+  await expect.poll(async () => (await readAll(page)).activities.some((m) => m.includes('データの版を更新しました（v5 → v6）。点検結果：問題なし'))).toBe(true);
+  const after = await readAll(page);
+  expect(after.version).toBe(6);
+  expect(after.employees).toBe(before.employees);
+  expect(after.documents).toBe(before.documents);
+  for (const t of before.tasks) expect(after.tasks.find((x) => x.id === t.id)).toEqual(t);
+  expect(after.meta).not.toContain('pendingMigrationCheck');
+  // 再読み込みしても点検は繰り返さない
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'データ管理' })).toBeVisible();
+  expect((await readAll(page)).activities.filter((m) => m.includes('データの版を更新しました')).length).toBe(1);
+  await page.getByTestId('integrity-check').click();
+  await expect(page.getByTestId('integrity-result')).toContainText('問題は見つかりませんでした');
+});
+
+test('[Migration] Phase 8 のデータ（同じ v6）を Phase 9 でそのまま使える（移行・点検の記録は作らない。点検は問題なし）', async ({ page }) => {
+  test.skip(!SITE, 'MIGRATION_SITE_URL が未設定のため skip');
+  await page.goto(`${SITE}/p8/#/tasks`);
+  await expect(page.getByTestId('quick-add-input')).toBeVisible();
+  await page.getByTestId('quick-add-input').fill('Phase 8 で追加したタスク');
+  await page.getByTestId('quick-add-submit').click();
+  await expect(page.locator('[data-task-title="Phase 8 で追加したタスク"]').first()).toBeVisible();
+  const before = await readAll(page);
+  expect(before.version).toBe(6);
+
+  await page.goto(`${SITE}/p9/#/tasks`);
+  await expect(page.locator('[data-task-title="Phase 8 で追加したタスク"]').first()).toBeVisible();
+  const after = await readAll(page);
+  expect(after.version).toBe(6);
+  expect(after.tasks.length).toBe(before.tasks.length);
+  for (const t of before.tasks) expect(after.tasks.find((x) => x.id === t.id)).toEqual(t);
+  // 版が同じなので移行の記録・点検は行わない
+  expect(after.activities.some((m) => m.includes('データの版を更新しました'))).toBe(false);
+  await page.goto(`${SITE}/p9/#/data`);
+  await page.getByTestId('integrity-check').click();
+  await expect(page.getByTestId('integrity-result')).toContainText('問題は見つかりませんでした');
+});
