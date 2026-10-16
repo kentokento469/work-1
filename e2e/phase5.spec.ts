@@ -384,9 +384,9 @@ test('[Phase5] 単独起動でない（ブラウザのタブ）ときは標準�
   const W = page.viewportSize()!.width;
   await swipe(page, { x: 6, y: 420 }, { x: W * 0.7, y: 425 });
   await page.waitForTimeout(800);
-  // ブラウザ標準のジェスチャー (Chromium のオーバースクロールで戻る) で1画面だけ戻る。
-  // アプリの独自スワイプは動かない (動くと2画面戻ってダッシュボードになる)
-  await expect(page).toHaveURL(/#\/tasks/);
+  // アプリの独自スワイプは動かない。ブラウザ標準のジェスチャーがある環境 (このサーバーの Chromium) では1画面だけ戻り、
+  // 無い環境 (CI のヘッドレス Chromium など) では移動しない。どちらでも2画面戻る (二重に戻る) ことはない
+  expect(page.url()).toMatch(/#\/(faq|tasks)$/);
   await expect(page.getByTestId('swipe-back-indicator')).toHaveCount(0);
   expect(await page.evaluate(() => document.querySelector<HTMLElement>('[data-swipe-surface]')!.style.transform)).toBe('');
 });

@@ -65,7 +65,8 @@ async function importAndProcess(page: Page, testid: string, path: string, opts: 
 
 test.describe.configure({ mode: 'serial' });
 
-test('[Phase4] 画像の取り込み → 日本語OCR → 確認・修正 → 保存 → 再起動後も保持 → 重複警告', async ({ page, context, isMobile }) => {
+test('[Phase4] 画像の取り込み → 日本語OCR → 確認・修正 → 保存 → 再起動後も保持 → 重複警告', async ({ page, context, browserName, isMobile }) => {
+  test.skip(browserName !== 'chromium', '検証用の PDF・画像を Chromium の印刷機能で作るため Chromium のみ');
   test.setTimeout(180_000);
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
@@ -124,7 +125,8 @@ test('[Phase4] 画像の取り込み → 日本語OCR → 確認・修正 → �
   expect(errors).toEqual([]);
 });
 
-test('[Phase4] テキストPDF・画像PDF の解析経路、類似書類の比較', async ({ page, context }) => {
+test('[Phase4] テキストPDF・画像PDF の解析経路、類似書類の比較', async ({ page, context, browserName }) => {
+  test.skip(browserName !== 'chromium', '検証用の PDF・画像を Chromium の印刷機能で作るため Chromium のみ');
   test.setTimeout(180_000);
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
@@ -152,7 +154,8 @@ test('[Phase4] テキストPDF・画像PDF の解析経路、類似書類の比�
   expect(errors).toEqual([]);
 });
 
-test('[Phase4] 納品書 → 確認 → 在庫へ引き渡し（確認と実行の操作が必須・1回だけ）', async ({ page, context }) => {
+test('[Phase4] 納品書 → 確認 → 在庫へ引き渡し（確認と実行の操作が必須・1回だけ）', async ({ page, context, browserName }) => {
+  test.skip(browserName !== 'chromium', '検証用の PDF・画像を Chromium の印刷機能で作るため Chromium のみ');
   test.setTimeout(180_000);
   await makeFiles(context);
   await page.goto('/');
@@ -193,7 +196,8 @@ test('[Phase4] 納品書 → 確認 → 在庫へ引き渡し（確認と実行�
   await expect(page.getByTestId('handoff-open')).toHaveCount(0);
 });
 
-test('[Phase4] CSV出力（全件・明細）・バックアップ（元ファイル込み）から復元・iPhoneレイアウト', async ({ page, context, isMobile }) => {
+test('[Phase4] CSV出力（全件・明細）・バックアップ（元ファイル込み）から復元・iPhoneレイアウト', async ({ page, context, browserName, isMobile }) => {
+  test.skip(browserName !== 'chromium', '検証用の PDF・画像を Chromium の印刷機能で作るため Chromium のみ');
   test.setTimeout(180_000);
   await makeFiles(context);
   await page.goto('/');
