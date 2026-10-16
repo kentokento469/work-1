@@ -155,7 +155,7 @@ test('[Phase7] 5〜6. プロジェクト（作成・タスク追加・完了率�
   await expect(page.locator('[data-project-name="E2E案件"] [data-testid="project-progress"]')).toContainText('100%（2/2）');
 });
 
-test('[Phase7] 7〜8. 繰り返しは重複生成しない・リスト／ボード／カレンダーが同じデータを表示・依存関係の表示', async ({ page }) => {
+test('[Phase7] 7〜8. 繰り返しは重複生成しない・リスト／ボード／カレンダーが同じデータを表示・依存関係の表示', async ({ page, isMobile }) => {
   await start(page);
   await gotoHash(page, '#/tasks?status=all&q=%E7%B5%8C%E8%B2%BB');
   // 7. 毎月末の繰り返し: 完了 → 次回 (翌月末) を1件作成。未完了に戻して再完了しても増えない
@@ -183,6 +183,12 @@ test('[Phase7] 7〜8. 繰り返しは重複生成しない・リスト／ボー�
   await expect(card).toBeVisible();
   await card.getByRole('combobox').selectOption('in_progress');
   await expect(page.locator('[data-testid="board-col-in_progress"] [data-task-title="来週の会議資料を準備する"]')).toBeVisible();
+  // PC はドラッグ＆ドロップでも移動できる (スマホは上の進捗メニュー)
+  if (!isMobile) {
+    await page.locator('[data-testid="board-card"][data-task-title="来週の会議資料を準備する"]').dragTo(page.getByTestId('board-col-on_hold'));
+    await expect(page.locator('[data-testid="board-col-on_hold"] [data-task-title="来週の会議資料を準備する"]')).toBeVisible();
+    await page.locator('[data-testid="board-col-on_hold"] [data-task-title="来週の会議資料を準備する"]').getByRole('combobox').selectOption('in_progress');
+  }
   await page.getByTestId('view-list').click();
   await expect(item(page, '来週の会議資料を準備する').getByRole('combobox')).toHaveValue('in_progress');
   // カレンダー: 期限なしの一覧に表示 → 期限を設定 → その日に表示 → リストにも反映

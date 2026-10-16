@@ -175,3 +175,40 @@ test('[Migration] Phase 4 のデータ（社員・在庫・書類）を保持し
   await page.locator('a[href^="#/employees/"]:visible').first().click();
   await expect(page.getByTestId('back-link')).toBeVisible();
 });
+
+test('[Migration] Phase 6 のデータ（タスク・社員・書類）を保持したまま Phase 7 に移行できる', async ({ page }) => {
+  test.skip(!SITE, 'MIGRATION_SITE_URL が未設定のため skip');
+  const read = () =>
+    page.evaluate(async () => {
+      const db = await new Promise<IDBDatabase>((r) => {
+        const q = indexedDB.open('workcore');
+        q.onsuccess = () => r(q.result);
+      });
+      const has = (s: string) => db.objectStoreNames.contains(s);
+      const all = (s: string) => (has(s) ? new Promise<{ id: string; title?: string; dueDate?: string; assigneeDepartmentId?: string }[]>((r) => { const c = db.transaction(s).objectStore(s).getAll(); c.onsuccess = () => r(c.result); }) : Promise.resolve(null));
+      const v = { version: db.version, tasks: await all('tasks'), employees: (await all('employees'))?.length, documents: (await all('documents'))?.length, projects: (await all('projects'))?.length ?? -1 };
+      db.close();
+      return v;
+    });
+  // Phase 6 版: タスクを1件完了にして状態を作る
+  await page.goto(`${SITE}/p6/#/tasks`);
+  await expect(page.getByRole('heading', { name: 'タスク管理' })).toBeVisible();
+  const before = await read();
+  expect(before.version).toBe(5);
+  expect(before.projects).toBe(-1);
+
+  // Phase 7 版で開く → v6 へ移行。既存のタスクは変更されない (期限・部署もそのまま)
+  await page.goto(`${SITE}/p7/#/tasks`);
+  await expect(page.getByTestId('quick-add-input')).toBeVisible();
+  const after = await read();
+  expect(after.version).toBe(6);
+  expect(after.projects).toBe(0);
+  expect(after.employees).toBe(before.employees);
+  expect(after.documents).toBe(before.documents);
+  expect(after.tasks!.length).toBe(before.tasks!.length);
+  for (const t of before.tasks!) expect(after.tasks!.find((x) => x.id === t.id)).toEqual(t);
+  // 移行後の版で、旧タスクを編集・新しいタスクを追加できる
+  await page.getByTestId('quick-add-input').fill('移行後のタスク');
+  await page.getByTestId('quick-add-submit').click();
+  await expect(page.locator('[data-task-title="移行後のタスク"]')).toBeVisible();
+});

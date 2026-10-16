@@ -218,7 +218,8 @@ test('[Phase2] 途中離脱・誤操作からの復帰（下書き・破棄確�
 
   // モーダル: 入力中に背景をタップしても消えない
   await gotoHash(page, '#/tasks');
-  await page.getByRole('button', { name: '新規タスク' }).click();
+  // Phase 7 から詳細入力の作成はクイック追加の下のボタン
+  await page.getByTestId('task-new').click();
   await page.getByRole('dialog').getByLabel('タスク名').fill('入力途中のタスク');
   await page.getByTestId('modal-backdrop').click({ position: { x: 10, y: 10 }, force: true });
   await expect(page.getByText('入力した内容は保存されていません')).toBeVisible();
@@ -228,7 +229,7 @@ test('[Phase2] 途中離脱・誤操作からの復帰（下書き・破棄確�
   await page.getByRole('button', { name: '破棄して閉じる' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   // 変更がなければ確認なしで閉じる (過剰な確認を出さない)
-  await page.getByRole('button', { name: '新規タスク' }).click();
+  await page.getByTestId('task-new').click();
   await page.getByTestId('modal-backdrop').click({ position: { x: 10, y: 10 }, force: true });
   await expect(page.getByRole('dialog')).toHaveCount(0);
 
@@ -287,7 +288,7 @@ test('[Phase2] FAQ化・バックアップ復元・既存データ保持・iPhon
   const path = join(mkdtempSync(join(tmpdir(), 'workcore-e2e-')), 'backup.json');
   await dl.saveAs(path);
   const backup = JSON.parse(readFileSync(path, 'utf8'));
-  expect(backup.schemaVersion).toBe(5);
+  expect(backup.schemaVersion).toBe(6); // Phase 7 でバックアップ v6
   expect(backup.data.inquiries.length).toBeGreaterThan(10);
   const [csv] = await Promise.all([page.waitForEvent('download'), page.getByTestId('export-inquiries').click()]);
   expect(readFileSync((await csv.path())!, 'utf8').charCodeAt(0)).toBe(0xfeff);

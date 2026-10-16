@@ -370,3 +370,10 @@ interface AssistProvider {
 - 通知 → 対象：`href` は詳細画面、または一覧の `?focus=<対象ID>`。一覧側は対象要素に `data-focus-id` を付け、`useFocusHighlight` が描画を待ってスクロール・強調し、URL から `focus` を外す。ルーターは `focus` 付きの遷移ではスクロール位置を復元しない
 - 一覧の絞り込み（`useQueryState`）は URL を先に書き換えてから state を更新する（同時に届く hashchange と競合しない）
 - 編集ダイアログの初期化は「開いた時・対象 ID が変わった時」だけ（背景のデータ再読み込みで入力を消さない）
+
+## 24. Phase 7：汎用タスク管理（`services/taskService.ts`）
+
+- `Task` に任意の項目を追加：`startDate`・`projectId`・`parentTaskId`・`tags`・`checklist`・`recurrence`（`freq/interval/weekdays/monthDay/anchor`）・`seriesId`・`nextOccurrenceId`・`dependsOn`・`links`（品目・発注書・書類などへの関連）。`assigneeDepartmentId`・`dueDate` は `null` を許容。旧データには項目が無い＝未設定として全処理が動く（タスクの書き換えを伴う移行は不要）
+- DB v6：`projects` ストアを追加（`migrateToV6`）。バックアップ v6（v1〜v5 は `projects=[]`、旧版のタスクのプロジェクト所属は外して取り込む）
+- `TaskService`：作成・更新（入力の正規化・検証〔開始日≦期限・タグ・チェックリスト・繰り返しは期限が必要・プロジェクト/親の存在・サブタスク1段・依存の循環〕）、状態変更（完了で繰り返しの次回を1件作成、サブタスクの一括完了）、削除（サブタスクも）と復元、複製、チェック項目の切り替え、期限の変更、プロジェクト（作成・更新・アーカイブ・削除〔所属を外す〕・復元）。`WorkCoreService` の従来のタスク操作は委譲して互換を保つ
+- 画面：`TasksPage`（`view=list|board|calendar|projects`、`status`＝主要な絞り込み〔旧来の進捗値も受け付ける〕、詳細条件はクエリに保存）、`QuickAdd`、`BoardView`、`CalendarView`、`ProjectsView`、`RelatedTasksCard`
