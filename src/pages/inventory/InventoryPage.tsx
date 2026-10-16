@@ -3,6 +3,8 @@
  * スマホでは「PC用の在庫表を縮小する」のではなく、品目ごとのカードで最重要の数 (利用可能数) を大きく見せ、
  * 頻度の高い操作 (入庫・出庫・貸出・返却) をカードから直接実行できるようにする。
  */
+import { MissingTargetNotice } from '../../ui/notices';
+import { useFocusHighlight, useFocusParam } from '../../app/focus';
 import { useMemo, useState } from 'react';
 import { AttentionSection } from '../../ui/notices';
 import {
@@ -306,7 +308,11 @@ export function PoStatusBadge({ status }: { status: PurchaseOrderStatus }) {
 function OrdersTab({ f, setF }: TabProps) {
   const { data, run } = useAppData();
   const open = data.purchaseSuggestions.filter((s) => s.status === 'open');
-  const [selected, setSelected] = useState<Set<string>>(() => new Set(open.map((s) => s.id)));
+  // 在庫不足の通知から来た場合 (focus=sug:ID) は、その発注候補だけを選んだ状態で強調表示する
+  const focusId = useFocusParam();
+  const focusSug = focusId?.startsWith('sug:') ? open.find((s) => `sug:${s.id}` === focusId) : undefined;
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(focusSug ? [focusSug.id] : open.map((s) => s.id)));
+  const sugFocus = useFocusHighlight(focusId?.startsWith('sug:') ? focusId : null);
   const [busy, setBusy] = useState(false);
   const [requestedBy, setRequestedBy] = useState('加藤 由美');
   const [supplierEdit, setSupplierEdit] = useState<Supplier | 'new' | null>(null);
@@ -330,6 +336,7 @@ function OrdersTab({ f, setF }: TabProps) {
 
   return (
     <div className="space-y-4">
+      {sugFocus === 'missing' && <MissingTargetNotice what="発注候補">発注書の作成済み・在庫の回復で候補がなくなった可能性があります。</MissingTargetNotice>}
       <Card>
         <CardHeader title="発注候補（自動作成・下書き）" icon={FilePlus2} description="在庫不足から自動で作成された候補です。発注書を作るまで確定ではありません" />
         <div className="p-4 sm:p-5">
@@ -341,7 +348,7 @@ function OrdersTab({ f, setF }: TabProps) {
                 {open.map((s) => {
                   const item = itemById.get(s.itemId);
                   return (
-                    <li key={s.id} className="rounded-xl border border-violet-200 bg-violet-50/40 p-3 dark:border-violet-900 dark:bg-violet-950/20" data-suggestion-item={item?.name}>
+                    <li key={s.id} className="rounded-xl border border-violet-200 bg-violet-50/40 p-3 dark:border-violet-900 dark:bg-violet-950/20" data-suggestion-item={item?.name} data-focus-id={`sug:${s.id}`}>
                       <label className="flex cursor-pointer items-start gap-3">
                         <input type="checkbox" className="mt-1 size-5 shrink-0 accent-navy-700" checked={selected.has(s.id)} onChange={(e) => setSelected((x) => { const n = new Set(x); if (e.target.checked) n.add(s.id); else n.delete(s.id); return n; })} aria-label={`${item?.name}を発注書に含める`} />
                         <span className="min-w-0 flex-1">

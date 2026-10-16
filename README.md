@@ -5,6 +5,7 @@
 > **Phase 2**：社内ヘルプデスク・問い合わせ自動分類・FAQ提案・タスク連携・分析、Phase 1 の UX 改善
 > **Phase 3**：在庫・備品・IT資産・購買管理、社員・ヘルプデスクとの連携、自動化エンジン（提案 → 承認 → 実行 → 履歴）
 > **Phase 4**：書類管理（請求書・領収書・納品書・見積書・申請書）、端末内OCR・PDF解析、確認・修正、重複検出、CSV出力
+> **Phase 6.1**：すべての通知・警告から「通知が求める操作」を移動先で完了できるよう修正（入社準備の通知 → 対象社員の未完了タスク等）、通知の種類ごとの定義と検査を共通化
 > **Phase 6**：共通通知システム（通知センター・各画面の「要対応」・対象への直接移動と強調表示・未読と未処理の区別）、情報到達性の改善
 > **Phase 5**：部門をまたぐ自動化ルールの一元管理（入社・退職・在庫・問い合わせ・書類）、スマート入力（電話番号・郵便番号→住所・金額・候補）、戻る操作の最適化（履歴・モーダル・スワイプ）
 
@@ -218,6 +219,7 @@ npm run test:e2e     # E2E（Chromium のパスは CHROMIUM_PATH で指定可）
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | システム構成・データモデル・マイグレーション・状態遷移 |
 | [docs/META_DESIGN.md](docs/META_DESIGN.md) | メタ理解設計：参考資料、抽出した原理、採用・不採用の理由、検証結果 |
 | [docs/UX_AUDIT.md](docs/UX_AUDIT.md) | UX 監査と改善（Phase 1〜3） |
+| [docs/PHASE6_1_RESULTS.md](docs/PHASE6_1_RESULTS.md) | Phase 6.1：通知から操作画面へ到達できない問題の原因・全通知の導線監査・再発防止策・テスト結果 |
 | [docs/PHASE6_RESULTS.md](docs/PHASE6_RESULTS.md) | Phase 6 の調査（全バッジの発生元・計算式）・設計・検証結果・制約 |
 | [docs/PHASE7_PLAN.md](docs/PHASE7_PLAN.md) | 次期開発計画（Phase 7 への引き継ぎ） |
 | [docs/PHASE5_RESULTS.md](docs/PHASE5_RESULTS.md) | Phase 5 の検証項目1〜15・自動化できる業務・修正した不具合・未検証事項 |

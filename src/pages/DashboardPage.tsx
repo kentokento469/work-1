@@ -124,6 +124,8 @@ const CATEGORY_LABEL: Record<ActivityCategory, string> = {
 export function DashboardPage() {
   const { stats, data, today, empById } = useAppData();
   const s = stats;
+  // 期限超過・問い合わせの超過/新規は通知 (上の「対応が必要なこと」) と重複するため、ここには出さない
+  const upcoming = s.attention.filter((a) => a.kind === 'due_soon' || a.kind === 'unprepared_hire');
 
   return (
     <>
@@ -164,13 +166,13 @@ export function DashboardPage() {
 
       <div className="mt-4 grid gap-4 lg:grid-cols-5">
         <Card className="lg:col-span-3">
-          <CardHeader title="優先対応が必要な業務" icon={Flame} description="期限超過・期限間近（3日以内）・入社準備の未着手を自動抽出" />
+          <CardHeader title="もうすぐ期限・準備の未着手" icon={Flame} description="期限超過などの「対応が必要なこと」は上の通知に表示。ここでは期限まで3日以内のタスクと、入社準備タスクが未生成の社員を表示" />
           <div className="px-2 pb-3 pt-2 sm:px-3">
-            {s.attention.length === 0 ? (
-              <EmptyState icon={CircleCheckBig} title="優先対応が必要な業務はありません" />
+            {upcoming.length === 0 ? (
+              <EmptyState icon={CircleCheckBig} title="3日以内に期限のタスク・準備未着手の社員はありません" />
             ) : (
               <ul className="divide-y divide-slate-100 dark:divide-navy-800">
-                {s.attention.slice(0, 7).map((a) => (
+                {upcoming.slice(0, 7).map((a) => (
                   <li key={a.id}>
                     <a
                       href={a.inquiryId ? `#/helpdesk/${a.inquiryId}` : a.employeeId ? `#/onboarding?employee=${a.employeeId}` : `#/tasks?focus=${a.taskId}`}
@@ -209,9 +211,9 @@ export function DashboardPage() {
                 ))}
               </ul>
             )}
-            {s.attention.length > 7 && (
-              <a href="#/notifications" className="mt-1 block px-2 py-2 text-center text-xs font-semibold text-navy-600 dark:text-navy-300">
-                ほか {s.attention.length - 7}件（通知センターで確認）
+            {upcoming.length > 7 && (
+              <a href="#/tasks?status=open&sort=due" className="mt-1 block px-2 py-2 text-center text-xs font-semibold text-navy-600 dark:text-navy-300">
+                ほか {upcoming.length - 7}件（タスク一覧で確認）
               </a>
             )}
           </div>

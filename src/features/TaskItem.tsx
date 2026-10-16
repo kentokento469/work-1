@@ -49,6 +49,8 @@ export function TaskItem({ task, onOpen, showEmployee = true, note }: { task: Ta
       data-testid="task-item"
       data-task-title={task.title}
       data-focus-id={task.id}
+      data-employee-id={task.employeeId ?? ''}
+      data-task-status={task.status}
     >
       {overdue && <span className="absolute inset-y-0 left-0 w-1 bg-red-500" aria-hidden />}
       <div className="flex items-start gap-3 px-4 py-3 sm:px-5">

@@ -7,7 +7,7 @@ import { PRIORITIES, PRIORITY_LABEL, PRIORITY_WEIGHT, TASK_STATUS_LABEL, type Ta
 import { TaskFormModal } from '../features/TaskFormModal';
 import { TaskItem } from '../features/TaskItem';
 import { Button, Card, EmptyState, FilterDisclosure, FilterSelect, PageHeader, cx } from '../ui/primitives';
-import { AttentionSection, MissingTargetNotice } from '../ui/notices';
+import { AttentionSection, MissingTargetNotice, TargetNotices } from '../ui/notices';
 import { useFocusHighlight } from '../app/focus';
 import type { NoticeModule } from '../domain/notifications';
 
@@ -110,13 +110,31 @@ export function TasksPage({ query }: { query: URLSearchParams }) {
       />
 
       {focusId && !focusTask && <MissingTargetNotice what="タスク" />}
+      {employee && !filteredEmployee && <MissingTargetNotice what="社員" />}
+      {filteredEmployee && (
+        <div className="mb-3" data-testid="employee-task-context">
+          <p className="mb-2 flex flex-wrap items-center gap-2 text-sm font-bold">
+            {filteredEmployee.name}さんの{source === 'onboarding' ? '入社準備' : ''}タスク
+            <a href={`#/employees/${filteredEmployee.id}`} className="inline-flex min-h-9 items-center text-xs font-semibold text-navy-600 dark:text-navy-300">
+              社員の詳細
+            </a>
+            {source === 'onboarding' && (
+              <a href={`#/onboarding?employee=${filteredEmployee.id}`} className="inline-flex min-h-9 items-center text-xs font-semibold text-navy-600 dark:text-navy-300">
+                入社準備（タスクの追加生成）
+              </a>
+            )}
+          </p>
+          <TargetNotices targetId={filteredEmployee.id} />
+        </div>
+      )}
       {filterAdjusted && focusTask && (
         <p className="mb-3 rounded-xl bg-navy-50 p-3 text-xs text-navy-800 dark:bg-navy-800 dark:text-navy-100" role="status" data-testid="filter-adjusted">
           「{focusTask.title}」が絞り込み条件で隠れていたため、条件を解除して表示しています
         </p>
       )}
 
-      <AttentionSection modules={TASK_MODULES} title="要対応（期限超過）" description="下部ナビ「タスク」の件数の内訳です。完了にするか期限を見直すと消えます" testId="task-attention">
+      {/* 社員で絞り込んでいる時は、その社員のタスクだけを表示する (他の社員の要対応を混ぜない) */}
+      {!filteredEmployee && <AttentionSection modules={TASK_MODULES} title="要対応（期限超過）" description="下部ナビ「タスク」の件数の内訳です。完了にするか期限を見直すと消えます" testId="task-attention">
         {(items) => (
           <ul className="divide-y divide-slate-100 dark:divide-navy-800" data-testid="task-attention-list">
             {items.map((n) => {
@@ -125,7 +143,7 @@ export function TasksPage({ query }: { query: URLSearchParams }) {
             })}
           </ul>
         )}
-      </AttentionSection>
+      </AttentionSection>}
 
       <div className="mb-3 flex flex-wrap gap-1.5" role="tablist" aria-label="進捗状況で絞り込み">
         {STATUS_TABS.map((t) => (
@@ -223,7 +241,7 @@ export function TasksPage({ query }: { query: URLSearchParams }) {
           <EmptyState
             icon={ClipboardList}
             title="該当するタスクはありません"
-            description={status === 'overdue' ? '期限超過のタスクはありません。順調です！' : '条件を変更するか、新しいタスクを作成してください'}
+            description={status === 'overdue' ? '期限超過のタスクはありません。順調です！' : filteredEmployee && status === 'open' ? `${filteredEmployee.name}さんの未完了のタスクはありません（すべて完了しました）` : '条件を変更するか、新しいタスクを作成してください'}
           />
         ) : (
           <ul className="divide-y divide-slate-100 dark:divide-navy-800" data-testid="task-list">

@@ -136,7 +136,7 @@ export function ItemDetailPage({ itemId }: { itemId: string }) {
       </Card>
 
       {suggestion && (
-        <a href="#/inventory?tab=orders" className="mt-4 flex items-center gap-2 rounded-2xl border border-violet-200 bg-violet-50 p-4 text-sm dark:border-violet-900 dark:bg-violet-950/30">
+        <a href={`#/inventory?tab=orders&focus=${encodeURIComponent(`sug:${suggestion.id}`)}`} className="mt-4 flex items-center gap-2 rounded-2xl border border-violet-200 bg-violet-50 p-4 text-sm dark:border-violet-900 dark:bg-violet-950/30">
           <PackageCheck className="size-5 shrink-0 text-violet-700" aria-hidden />
           <span className="flex-1">
             発注候補があります：推奨 <strong>{suggestion.quantity}{item.unit}</strong>（発注タブで発注書を作成）

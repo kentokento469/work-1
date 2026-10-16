@@ -69,3 +69,19 @@ export function useFocusHighlight(focusId: string | null, ready = true, timeoutM
   }, [focusId, ready, timeoutMs]);
   return status;
 }
+
+/** 現在の URL の focus パラメータ (画面内のハッシュ変更にも追従) */
+export function useFocusParam(): string | null {
+  const read = () => new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('focus');
+  const [v, setV] = useState(read);
+  useEffect(() => {
+    const on = () => {
+      const next = read();
+      // focus を外した (強調表示の後始末) だけの変更では値を保つ
+      if (next) setV(next);
+    };
+    window.addEventListener('hashchange', on);
+    return () => window.removeEventListener('hashchange', on);
+  }, []);
+  return v;
+}

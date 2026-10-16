@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AlarmClock, AlertTriangle, Bell, CheckCircle2, ChevronDown, ChevronRight, Inbox, Info, ShieldCheck, type LucideIcon } from 'lucide-react';
 import { useAppData } from '../app/AppData';
+import { parseHash } from '../app/router';
 import { formatDateJa, formatDateTimeJa } from '../domain/date';
 import { NOTICE_KIND_LABEL, NOTICE_MODULE_LABEL, isUnread, type AppNotice, type NoticeKind, type NoticeModule } from '../domain/notifications';
 import { cx } from './primitives';
@@ -147,6 +148,7 @@ export function AttentionSection({
  */
 export function TargetNotices({ targetId, className }: { targetId: string; className?: string }) {
   const { notices, markNoticesRead } = useAppData();
+  const here = parseHash(window.location.hash).path;
   const items = useMemo(() => notices.filter((n) => n.target.id === targetId), [notices, targetId]);
   const ids = items.map((n) => n.id).join(',');
   useEffect(() => {
@@ -165,6 +167,17 @@ export function TargetNotices({ targetId, className }: { targetId: string; class
                 {ui.label}：{n.reason}
               </p>
               <p className="mt-0.5 text-xs">→ {n.action}</p>
+              {/* 操作する画面が別なら、そこへ移動するボタンを出す (この画面で操作できる場合は出さない) */}
+              {parseHash(n.href.slice(1)).path !== here && (
+                <a
+                  href={n.href}
+                  className="mt-2 inline-flex min-h-11 items-center gap-1 rounded-lg bg-white px-3 text-sm font-semibold text-navy-800 shadow-sm ring-1 ring-inset ring-slate-200 dark:bg-navy-900 dark:text-white dark:ring-navy-700"
+                  data-testid="target-notice-action"
+                >
+                  {n.actionLabel}
+                  <ChevronRight className="size-4" aria-hidden />
+                </a>
+              )}
             </div>
           </div>
         );

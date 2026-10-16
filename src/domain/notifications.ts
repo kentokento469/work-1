@@ -39,8 +39,10 @@ export interface AppNotice {
   at: string;
   /** 1 = 高い。並び順に使う */
   priority: 1 | 2 | 3;
-  /** 遷移先 (ディープリンク。対象を強調表示するための focus を含む) */
+  /** 遷移先 (ディープリンク)。通知が求める操作を「その場で」実行できる画面を指す (NOTICE_SPECS で種類ごとに定義) */
   href: string;
+  /** 遷移先へ移動するボタンの文言 (例:「未完了の準備タスクを開く」) */
+  actionLabel: string;
   /** 未処理件数に含めるか (false = お知らせ) */
   actionable: boolean;
 }
@@ -55,6 +57,33 @@ export type NoticeType =
   | 'automation_proposal'
   | 'hire_unprepared'
   | 'automation_auto_run';
+
+/**
+ * 通知の種類ごとの定義 (通知の生成と移動先を1か所で決める)。
+ * 「必要な操作 (action)」に書いた操作は、必ず移動先の画面でその場で実行できること。
+ * 新しい通知を追加するときはここに定義を足し、e2e/phase6-1.spec.ts の「通知の約束」テストに操作手順を足す。
+ */
+export interface NoticeSpec {
+  targetType: AppNotice['target']['type'];
+  /** detail = 対象の詳細画面 / list-focus = 一覧で対象を強調表示 / filtered-list = 対象に絞り込んだ一覧 */
+  destination: 'detail' | 'list-focus' | 'filtered-list';
+  /** 移動先で行う操作 (画面上のボタン・項目名) */
+  operation: string;
+  /** 通知が消える条件 */
+  resolvedWhen: string;
+  actionLabel: string;
+}
+export const NOTICE_SPECS: Record<NoticeType, NoticeSpec> = {
+  task_overdue: { targetType: 'task', destination: 'list-focus', operation: 'タスク画面の「要対応」で対象を強調。行のステータスを「完了」にする／タスク名を押して期限・担当を編集', resolvedWhen: '完了・期限を今日以降に変更・削除', actionLabel: 'タスクを開く' },
+  inquiry_overdue: { targetType: 'inquiry', destination: 'detail', operation: '問い合わせ詳細のステータスで「解決済み」を押して解決内容を記録／編集で期限を見直す', resolvedWhen: '解決済み・完了・期限の変更', actionLabel: '問い合わせを開く' },
+  inquiry_new: { targetType: 'inquiry', destination: 'detail', operation: '問い合わせ詳細のステータスで「対応中」を押す／対応タスクを作成する', resolvedWhen: 'ステータスが新規以外になる', actionLabel: '問い合わせを開く' },
+  stock_shortage: { targetType: 'item', destination: 'list-focus', operation: '発注候補を選んで「発注書（下書き）を作成」→ 発注書の「承認申請」→「承認する」（段階に応じて次の操作の画面へ移動）', resolvedWhen: '発注書の承認（発注残として見込み在庫に入る）・入庫で見込み在庫が最低在庫以上になる', actionLabel: '次の操作へ' },
+  po_approval: { targetType: 'purchaseOrder', destination: 'detail', operation: '発注書詳細で「承認する」／「差し戻す」', resolvedWhen: '承認・差し戻し・取り消し', actionLabel: '発注書を開く' },
+  document_review: { targetType: 'document', destination: 'detail', operation: '書類詳細で原本と照合し、重要項目にチェックして「確認完了」', resolvedWhen: '確認完了・ゴミ箱へ移動', actionLabel: '書類を開く' },
+  automation_proposal: { targetType: 'proposal', destination: 'list-focus', operation: '自動化センターで対象の提案を開いた状態で表示。「承認して実行」／「見送る」', resolvedWhen: '承認・見送り・状況の変化で条件を満たさなくなる', actionLabel: '提案を開く' },
+  hire_unprepared: { targetType: 'employee', destination: 'filtered-list', operation: 'タスク画面（対象社員・入社準備・未完了に絞り込み）で各タスクのステータスを「完了」にする／編集する', resolvedWhen: '対象社員の入社準備タスクがすべて完了・入社日を過ぎる', actionLabel: '未完了の準備タスクを開く' },
+  automation_auto_run: { targetType: 'automationRun', destination: 'list-focus', operation: '自動化センターの処理履歴で内容を確認（対応は不要）', resolvedWhen: '7日経過（既読で未読から外れる）', actionLabel: '処理履歴を開く' },
+};
 
 export const NOTICE_KIND_LABEL: Record<NoticeKind, string> = {
   overdue: '期限超過',
@@ -100,6 +129,9 @@ export const NAV_NOTICE_MODULES: Record<string, NoticeModule[]> = {
   menu: ['documents', 'automation', 'onboarding'],
 };
 
+/** 対象社員の未完了の入社準備タスクだけを表示するタスク一覧 */
+export const hireTasksHref = (employeeId: string) => `#/tasks?employee=${encodeURIComponent(employeeId)}&source=onboarding&status=open`;
+
 /** 自動化提案の通知・強調表示で使う識別子 */
 export const proposalFocusId = (p: Pick<AutomationProposal, 'automationId' | 'key'>) => `${p.automationId}|${p.key}`;
 
@@ -122,6 +154,8 @@ export interface NoticeInput {
 /** 実データから通知を導出する (純粋関数) */
 export function deriveNotices({ data, today, stock, proposals, infoDays = 7 }: NoticeInput): AppNotice[] {
   const out: AppNotice[] = [];
+  /** 種類ごとの定義 (NOTICE_SPECS) からボタンの文言を補う */
+  const add = (n: Omit<AppNotice, 'actionLabel'> & { actionLabel?: string }) => out.push({ ...n, actionLabel: n.actionLabel ?? NOTICE_SPECS[n.type].actionLabel });
   const empName = new Map(data.employees.map((e) => [e.id, e.name]));
 
   // タスク: 期限超過
@@ -129,7 +163,7 @@ export function deriveNotices({ data, today, stock, proposals, infoDays = 7 }: N
     if (!isTaskOverdue(t, today)) continue;
     const days = diffDays(t.dueDate, today);
     const who = t.employeeId ? `（${empName.get(t.employeeId) ?? '対象社員'}）` : '';
-    out.push({
+    add({
       id: `task_overdue:${t.id}`,
       type: 'task_overdue',
       kind: 'overdue',
@@ -149,7 +183,7 @@ export function deriveNotices({ data, today, stock, proposals, infoDays = 7 }: N
   for (const i of data.inquiries) {
     if (isInquiryOverdue(i, today)) {
       const days = diffDays(i.dueDate, today);
-      out.push({
+      add({
         id: `inquiry_overdue:${i.id}`,
         type: 'inquiry_overdue',
         kind: 'overdue',
@@ -157,14 +191,14 @@ export function deriveNotices({ data, today, stock, proposals, infoDays = 7 }: N
         target: { type: 'inquiry', id: i.id },
         title: `${i.number} ${i.title}`,
         reason: `回答期限 ${fmtDate(i.dueDate)} を${days}日過ぎています（申請者 ${i.requesterName}）`,
-        action: '対応を進めて解決する、または申請者に状況を連絡してください',
+        action: '対応が終わったらステータスの「解決済み」で解決内容を記録してください（まだの場合は編集で期限を見直す）',
         at: i.dueDate,
         priority: 1,
         href: `#/helpdesk/${encodeURIComponent(i.id)}`,
         actionable: true,
       });
     } else if (i.status === 'new') {
-      out.push({
+      add({
         id: `inquiry_new:${i.id}`,
         type: 'inquiry_new',
         kind: 'review',
@@ -172,7 +206,7 @@ export function deriveNotices({ data, today, stock, proposals, infoDays = 7 }: N
         target: { type: 'inquiry', id: i.id },
         title: `${i.number} ${i.title}`,
         reason: `新しい問い合わせがまだ受け付けられていません（申請者 ${i.requesterName}・優先度 ${PRIORITY_LABEL[i.priority]}）`,
-        action: '内容を確認して「受け付ける」を押してください',
+        action: '内容を確認し、ステータスの「対応中」を押すか、対応タスクを作成してください',
         at: i.receivedAt,
         priority: i.priority === 'high' ? 1 : 2,
         href: `#/helpdesk/${encodeURIComponent(i.id)}`,
@@ -181,22 +215,33 @@ export function deriveNotices({ data, today, stock, proposals, infoDays = 7 }: N
     }
   }
 
-  // 在庫: 不足
+  // 在庫: 不足。対応の段階 (発注候補 → 発注書の下書き → 承認待ち) に応じて、次の操作ができる画面へ案内する
   for (const item of data.items) {
     const s = stock.get(item.id);
     if (!item.active || !s?.shortage) continue;
-    out.push({
+    const covering = data.purchaseOrders.filter((po) => (po.status === 'draft' || po.status === 'pending_approval') && po.lines.some((l) => l.itemId === item.id && l.quantity > l.receivedQuantity));
+    // 承認待ちの発注書があれば、その「発注書の承認待ち」通知で対応できるので重複して出さない
+    if (covering.some((po) => po.status === 'pending_approval') && s.recommendedQty === 0) continue;
+    const suggestion = data.purchaseSuggestions.find((x) => x.itemId === item.id && x.status === 'open');
+    const draft = covering.find((po) => po.status === 'draft');
+    const next = suggestion
+      ? { href: `#/inventory?tab=orders&focus=${encodeURIComponent(`sug:${suggestion.id}`)}`, action: `発注候補（推奨 ${suggestion.quantity}${item.unit}）を選んで「発注書（下書き）を作成」を押してください`, actionLabel: '発注候補を開く' }
+      : draft
+        ? { href: `#/inventory/orders/${encodeURIComponent(draft.id)}`, action: `発注書 ${draft.number}（下書き）を確認して「承認申請」してください。承認されると見込み在庫に入り、この通知は消えます`, actionLabel: '発注書を開く' }
+        : { href: `#/inventory/items/${encodeURIComponent(item.id)}`, action: '在庫数を確認し、必要なら「入庫」で記録してください', actionLabel: '品目を開く' };
+    add({
       id: `stock_shortage:${item.id}`,
       type: 'stock_shortage',
       kind: 'attention',
       module: 'inventory',
       target: { type: 'item', id: item.id },
       title: `${item.name} の在庫不足`,
-      reason: `利用可能 ${s.available}${item.unit}（最低在庫 ${item.minStock}${item.unit}${s.backorder ? `・入荷待ち ${s.backorder}${item.unit}` : ''}${s.onOrder ? `・発注残 ${s.onOrder}${item.unit}` : ''}）`,
-      action: s.recommendedQty > 0 ? `発注候補（推奨 ${s.recommendedQty}${item.unit}）から発注書を作成してください` : '発注済みの入荷を待つか、在庫を確認してください',
+      reason: `見込み在庫 ${s.projected}${item.unit} が最低在庫 ${item.minStock}${item.unit} を下回っています（利用可能 ${s.available}${s.backorder ? `・入荷待ち ${s.backorder}` : ''}${s.onOrder ? `・発注残 ${s.onOrder}` : ''}）`,
+      action: next.action,
+      actionLabel: next.actionLabel,
       at: today,
       priority: s.available <= 0 ? 1 : 2,
-      href: `#/inventory/items/${encodeURIComponent(item.id)}`,
+      href: next.href,
       actionable: true,
     });
   }
@@ -205,14 +250,14 @@ export function deriveNotices({ data, today, stock, proposals, infoDays = 7 }: N
   for (const po of data.purchaseOrders) {
     if (po.status !== 'pending_approval') continue;
     const supplier = data.suppliers.find((s) => s.id === po.supplierId)?.name ?? '仕入先未設定';
-    out.push({
+    add({
       id: `po_approval:${po.id}`,
       type: 'po_approval',
       kind: 'approval',
       module: 'inventory',
       target: { type: 'purchaseOrder', id: po.id },
       title: `発注書 ${po.number}（${supplier}）`,
-      reason: `承認申請されています（申請者 ${po.requestedBy || '未記入'}・${po.lines.length}品目）`,
+      reason: `承認申請されています（申請者 ${po.requestedBy || '未記入'}・${po.lines.length}品目${po.lines.some((l) => stock.get(l.itemId)?.shortage) ? '・在庫不足の解消に必要' : ''}）`,
       action: '内容を確認して承認、または差し戻してください（外部への発注は行われません）',
       at: po.updatedAt,
       priority: 2,
@@ -225,7 +270,7 @@ export function deriveNotices({ data, today, stock, proposals, infoDays = 7 }: N
   for (const d of data.documents) {
     if (d.deletedAt || d.status !== 'needs_review') continue;
     const issuer = d.fields.issuer ? `・${d.fields.issuer}` : '';
-    out.push({
+    add({
       id: `document_review:${d.id}`,
       type: 'document_review',
       kind: 'review',
@@ -244,7 +289,7 @@ export function deriveNotices({ data, today, stock, proposals, infoDays = 7 }: N
   // 自動化: 承認待ちの提案
   for (const p of proposals) {
     const approvals = p.actions.filter((a) => a.requiresApproval).length;
-    out.push({
+    add({
       id: `automation_proposal:${proposalFocusId(p)}`,
       type: 'automation_proposal',
       kind: 'approval',
@@ -267,7 +312,7 @@ export function deriveNotices({ data, today, stock, proposals, infoDays = 7 }: N
     if (days < 0 || days > 7) continue;
     const open = data.tasks.filter((t) => t.employeeId === e.id && t.source === 'onboarding' && t.status !== 'done');
     if (!open.length) continue;
-    out.push({
+    add({
       id: `hire_unprepared:${e.id}`,
       type: 'hire_unprepared',
       kind: 'attention',
@@ -275,10 +320,11 @@ export function deriveNotices({ data, today, stock, proposals, infoDays = 7 }: N
       target: { type: 'employee', id: e.id },
       title: `${e.name}さんの入社準備`,
       reason: `入社日 ${fmtDate(e.hireDate)}（${days === 0 ? '本日' : `あと${days}日`}）までに未完了の準備タスクが ${open.length}件あります`,
-      action: '入社準備画面で未完了のタスクを確認し、完了させてください',
+      action: `未完了の準備タスク（${open.length}件）を開き、終わったものを「完了」にしてください`,
       at: e.hireDate,
       priority: days <= 3 ? 1 : 2,
-      href: `#/onboarding?employee=${encodeURIComponent(e.id)}`,
+      // 入社準備画面 (タスクの自動生成) ではなく、対象社員の未完了の準備タスクに絞り込んだタスク一覧へ
+      href: hireTasksHref(e.id),
       actionable: true,
     });
   }
@@ -286,7 +332,7 @@ export function deriveNotices({ data, today, stock, proposals, infoDays = 7 }: N
   // お知らせ: 直近に自動で実行された処理
   for (const r of data.automationRuns) {
     if (r.status !== 'auto' || diffDays(r.at.slice(0, 10), today) > infoDays) continue;
-    out.push({
+    add({
       id: `automation_auto_run:${r.id}`,
       type: 'automation_auto_run',
       kind: 'info',

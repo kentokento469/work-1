@@ -6,7 +6,7 @@ import { readAutomationSettings, ruleSetting } from '../automation/settings';
 import { computeAllStock } from './inventory/stock';
 import { isTaskOverdue } from './analytics';
 import { isInquiryOverdue } from './helpdesk/inquiry';
-import { deriveNotices, markNoticesRead, navNoticeSummary, readNoticeState, syncNoticeLog, type NoticeState } from './notifications';
+import { NOTICE_SPECS, deriveNotices, hireTasksHref, markNoticesRead, navNoticeSummary, readNoticeState, syncNoticeLog, type NoticeState } from './notifications';
 import type { DataSnapshot } from './types';
 
 async function setup() {
@@ -97,7 +97,7 @@ describe('通知の導出（実データとの一致）', () => {
 
 describe('既読と未処理の区別・記録の同期', () => {
   const base = (): NoticeState => ({ log: {} });
-  const n = (id: string, actionable = true) => ({ id, type: 'task_overdue' as const, kind: 'overdue' as const, module: 'tasks' as const, target: { type: 'task' as const, id }, title: id, reason: 'r', action: 'a', at: '2026-10-01', priority: 2 as const, href: '#/tasks', actionable });
+  const n = (id: string, actionable = true) => ({ id, type: 'task_overdue' as const, kind: 'overdue' as const, module: 'tasks' as const, target: { type: 'task' as const, id }, title: id, reason: 'r', action: 'a', at: '2026-10-01', priority: 2 as const, href: '#/tasks', actionLabel: '開く', actionable });
 
   it('新しい通知は未読で記録、消えたら解消済み、再発したら未読・未解消に戻る', () => {
     let st = syncNoticeLog(base(), [n('a'), n('b')], '2026-10-15T09:00:00Z');
@@ -136,5 +136,70 @@ describe('既読と未処理の区別・記録の同期', () => {
     const st = readNoticeState(d);
     expect(st.log[list[0]!.id]!.readAt).not.toBeNull();
     expect(Object.keys(st.log)).toHaveLength(list.length);
+  });
+});
+
+describe('通知の約束（生成と移動先の整合）', () => {
+  /** App.tsx が扱う画面 (移動先として正しいか) */
+  const ROUTES = [/^\/tasks$/, /^\/helpdesk\/[^/]+$/, /^\/inventory$/, /^\/inventory\/(items|orders|assets)\/[^/]+$/, /^\/documents\/[^/]+$/, /^\/automation$/, /^\/onboarding$/];
+  const parse = (href: string) => {
+    const [path = '', q = ''] = href.replace(/^#/, '').split('?');
+    return { path, q: new URLSearchParams(q) };
+  };
+
+  it('すべての通知が定義どおりの移動先・操作・ボタン文言を持つ', async () => {
+    const s = await setup();
+    await s.documents.create({ type: 'receipt' });
+    const d = await s.loadSnapshot();
+    const { list } = notices(d);
+    const types = new Set(list.map((n) => n.type));
+    for (const t of ['task_overdue', 'inquiry_overdue', 'inquiry_new', 'stock_shortage', 'document_review', 'automation_proposal', 'hire_unprepared']) expect(types.has(t as never)).toBe(true);
+    for (const n of list) {
+      const spec = NOTICE_SPECS[n.type];
+      expect(spec.targetType).toBe(n.target.type);
+      const { path, q } = parse(n.href);
+      expect(ROUTES.some((r) => r.test(path)), `${n.type} → ${n.href}`).toBe(true);
+      if (spec.destination === 'detail') expect(path.endsWith(`/${encodeURIComponent(n.target.id)}`)).toBe(true);
+      if (spec.destination === 'list-focus' && n.type !== 'stock_shortage') expect(q.get('focus')).toBeTruthy();
+      expect(n.action.length).toBeGreaterThan(5);
+      expect(n.actionLabel.length).toBeGreaterThan(1);
+    }
+  });
+
+  it('入社準備の通知は、対象社員の未完了の入社準備タスクに絞り込んだタスク一覧へ移動する', async () => {
+    const s = await setup();
+    const d = await s.loadSnapshot();
+    const n = notices(d).list.find((x) => x.type === 'hire_unprepared')!;
+    const { path, q } = parse(n.href);
+    expect(path).toBe('/tasks');
+    expect(q.get('employee')).toBe(n.target.id);
+    expect(q.get('source')).toBe('onboarding');
+    expect(q.get('status')).toBe('open');
+    expect(n.href).toBe(hireTasksHref(n.target.id));
+    // 件数が理由に正しく書かれ、全件完了で消える
+    const open = d.tasks.filter((t) => t.employeeId === n.target.id && t.source === 'onboarding' && t.status !== 'done');
+    expect(n.reason).toContain(`${open.length}件`);
+    for (const t of open) await s.setTaskStatus(t.id, 'done');
+    expect(notices(await s.loadSnapshot()).list.some((x) => x.id === n.id)).toBe(false);
+  });
+
+  it('在庫不足の通知は段階に応じて次の操作の画面を指す（発注候補 → 下書きの発注書 → 承認待ちは発注書の通知に一本化 → 承認で解消）', async () => {
+    const s = await setup();
+    let d = await s.loadSnapshot();
+    let n = notices(d).list.find((x) => x.type === 'stock_shortage' && d.purchaseSuggestions.some((g) => g.itemId === x.target.id && g.status === 'open'))!;
+    const sug = d.purchaseSuggestions.find((g) => g.itemId === n.target.id && g.status === 'open')!;
+    expect(n.href).toBe(`#/inventory?tab=orders&focus=${encodeURIComponent(`sug:${sug.id}`)}`);
+    const po = (await s.inventory.createOrdersFromSuggestions([sug.id], '申請 花子')).value![0]!;
+    d = await s.loadSnapshot();
+    n = notices(d).list.find((x) => x.id === n.id)!;
+    expect(n.href).toBe(`#/inventory/orders/${po.id}`);
+    expect(n.action).toContain('承認申請');
+    await s.inventory.transitionOrder(po.id, 'submit', '申請 花子');
+    d = await s.loadSnapshot();
+    expect(notices(d).list.some((x) => x.id === n.id)).toBe(false);
+    expect(notices(d).list.find((x) => x.id === `po_approval:${po.id}`)?.reason).toContain('在庫不足の解消に必要');
+    await s.inventory.transitionOrder(po.id, 'approve', '承認 太郎');
+    d = await s.loadSnapshot();
+    expect(notices(d).list.some((x) => x.id === n.id || x.id === `po_approval:${po.id}`)).toBe(false);
   });
 });
