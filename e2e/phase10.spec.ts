@@ -148,3 +148,21 @@ test('[Phase10] プロジェクト：作成するとそのまま開き、続け�
   // 改善前: 作成後に一覧から新しいプロジェクトを探して開く操作 (1) が必要だった
   expect(op.count).toBe(5);
 });
+
+test('[Phase10] 入力途中の下書きは、入力の直後に画面を離れても失われない', async ({ page }) => {
+  await start(page);
+  await gotoHash(page, '#/helpdesk/new');
+  await page.getByLabel('件名').fill('入力の直後に移動');
+  // 保存の待ち時間 (0.4秒) より前に別の画面へ
+  await gotoHash(page, '#/');
+  await expect(page.getByRole('heading', { name: 'ダッシュボード' })).toBeVisible();
+  await gotoHash(page, '#/helpdesk/new');
+  await expect(page.getByText('前回の入力途中の内容を復元しました')).toBeVisible();
+  await expect(page.getByLabel('件名')).toHaveValue('入力の直後に移動');
+  // 破棄した後は戻らない
+  await page.getByRole('button', { name: '破棄して新規入力' }).click();
+  await gotoHash(page, '#/');
+  await gotoHash(page, '#/helpdesk/new');
+  await expect(page.getByLabel('件名')).toHaveValue('');
+  await expect(page.getByText('前回の入力途中の内容を復元しました')).toHaveCount(0);
+});

@@ -65,7 +65,11 @@ function readDraft<T>(key: string): T | null {
   }
 }
 
+/** 送信などで下書きを消した直後のキー。次に入力が変わるまで、画面を離れるときの保存で下書きを戻さない */
+const clearedKeys = new Set<string>();
+
 export function clearDraft(key: string): void {
+  clearedKeys.add(key);
   try {
     localStorage.removeItem(DRAFT_PREFIX + key);
   } catch {
@@ -85,6 +89,7 @@ export function useDraft<T extends object>(key: string | null, value: T, isEmpty
   useEffect(() => {
     if (!key || loaded.current === key) return;
     loaded.current = key;
+    clearedKeys.delete(key);
     const d = readDraft<T>(key);
     if (d && !isEmpty(d)) {
       onRestore(d);
@@ -93,21 +98,51 @@ export function useDraft<T extends object>(key: string | null, value: T, isEmpty
     // key が変わった時だけ読み込む
   }, [key]);
 
+  // 入力のたびに保存すると重いので少し待ってから保存する。待つ間に画面を離れた・タブを閉じた場合も失わないよう、
+  // 画面を離れるとき (アンマウント)・ページが隠れるとき (pagehide。Safari でタブを閉じる・アプリを切り替える) にすぐ保存する (Phase 10)
+  const latest = useRef({ key, value, isEmpty });
+  latest.current = { key, value, isEmpty };
+  const save = useCallback(() => {
+    const { key: k, value: v, isEmpty: empty } = latest.current;
+    if (!k || loaded.current !== k || clearedKeys.has(k)) return;
+    try {
+      const json = JSON.stringify(v);
+      if (empty(v) || detectSecrets(json).length) localStorage.removeItem(DRAFT_PREFIX + k);
+      else localStorage.setItem(DRAFT_PREFIX + k, json);
+    } catch {
+      /* 容量超過・プライベートモード等 */
+    }
+  }, []);
+  const pending = useRef(false);
+  const lastValue = useRef<T | null>(null);
   useEffect(() => {
     if (!key || loaded.current !== key) return;
+    // 消した後に入力が変わったら、また保存する (最初の実行・同じ値では解除しない)
+    if (lastValue.current !== null && lastValue.current !== value) clearedKeys.delete(key);
+    lastValue.current = value;
+    pending.current = true;
     const t = setTimeout(() => {
-      try {
-        const json = JSON.stringify(value);
-        if (isEmpty(value) || detectSecrets(json).length) localStorage.removeItem(DRAFT_PREFIX + key);
-        else localStorage.setItem(DRAFT_PREFIX + key, json);
-      } catch {
-        /* 容量超過・プライベートモード等 */
-      }
+      pending.current = false;
+      save();
     }, 400);
     return () => clearTimeout(t);
-  }, [key, value, isEmpty]);
+  }, [key, value, isEmpty, save]);
+  useEffect(() => {
+    const flush = () => {
+      if (!pending.current) return;
+      pending.current = false;
+      save();
+    };
+    window.addEventListener('pagehide', flush);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      flush();
+    };
+  }, [save]);
 
   const discard = useCallback(() => {
+    // 破棄した後に、待っていた保存で下書きが戻らないようにする (続けて入力した内容は保存する)
+    pending.current = false;
     if (key) clearDraft(key);
     setRestored(false);
   }, [key]);

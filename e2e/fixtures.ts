@@ -13,6 +13,20 @@ export const testNow = () => new Date(FIXED_NOW.getTime());
 export const test = base.extend({
   page: async ({ page }, use, testInfo) => {
     await page.clock.install({ time: FIXED_NOW });
+    if (process.env.PW_WEBKIT) {
+      // WebKit の調査用: 履歴の操作とイベントの順序をコンソールに出す (失敗時の診断に含まれる)
+      await page.addInitScript(() => {
+        const log = (m: string) => console.warn(`[hist] ${m} | hash=${location.hash} state=${JSON.stringify(history.state)}`);
+        const push = history.pushState.bind(history);
+        const replace = history.replaceState.bind(history);
+        const back = history.back.bind(history);
+        history.pushState = (d, u, url) => (push(d, u, url), log(`pushState ${JSON.stringify(d)}`));
+        history.replaceState = (d, u, url) => (replace(d, u, url), log(`replaceState ${JSON.stringify(d)}`));
+        history.back = () => (log('back()'), back());
+        addEventListener('popstate', () => log('popstate'));
+        addEventListener('hashchange', () => log('hashchange'));
+      });
+    }
     // 失敗の原因調査用 (Phase 10): 画面の URL の移り変わりとエラーを記録し、失敗したときだけ出力する
     const trail: string[] = [];
     page.on('framenavigated', (f) => f === page.mainFrame() && trail.push(`nav ${f.url().replace(/^https?:\/\/[^/]+/, '')}`));
@@ -32,7 +46,7 @@ export const test = base.extend({
       const where = await page
         .evaluate(() => `${location.hash} history.length=${history.length} state=${JSON.stringify(history.state)}`)
         .catch(() => '(取得できず)');
-      console.log(`[診断] ${testInfo.title}\n  最後の画面: ${where}\n  ${trail.slice(-25).join('\n  ')}`);
+      console.log(`[診断] ${testInfo.title}\n  最後の画面: ${where}\n  ${trail.slice(-60).join('\n  ')}`);
     }
   },
 });
