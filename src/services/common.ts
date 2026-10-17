@@ -75,8 +75,34 @@ export function storageErrorMessage(e: unknown): string {
     case 'aborted':
       return '保存が中断されたため、変更をすべて取り消しました（元のデータは残っています）。もう一度お試しください';
     default:
-      return `保存に失敗したため、変更をすべて取り消しました（元のデータは残っています）。${e instanceof Error && e.message ? `詳細：${e.message}` : ''}`;
+      // 技術的な詳細 (例外のメッセージ) は利用者向けの表示に含めず、開発者向けにコンソールへ出す (Phase 11)
+      return '保存に失敗したため、変更をすべて取り消しました（元のデータは残っています）。もう一度お試しください。繰り返す場合は画面を再読み込みしてください';
   }
+}
+
+/**
+ * エラーの分類 (Phase 11)。利用者に見せる説明と、開発者向けの記録 (コンソール) を分けるために使う。
+ * - input: 入力の誤り・業務ルール (例: 必須項目・重複・本人承認)。利用者が直せる
+ * - conflict: 整合性 (別のタブの変更との競合・参照先の削除)
+ * - storage: 端末の保存領域 (容量不足・接続切れ・中断)
+ * - permission / network: 将来 (ログイン・サーバー導入後) の権限・通信のエラー。現在は発生しない
+ * - system: プログラムの誤りなど想定外のもの。利用者には一般的な説明だけを見せる
+ */
+export type ErrorCategory = 'input' | 'conflict' | 'storage' | 'permission' | 'network' | 'system';
+
+export function classifyError(e: unknown): ErrorCategory {
+  if (e instanceof AppError) return e.code === 'conflict' ? 'conflict' : 'input';
+  const kind = classifyStorageError(e);
+  if (kind !== 'unknown') return 'storage';
+  if (e instanceof TypeError && /fetch|network/i.test(e.message)) return 'network';
+  return 'system';
+}
+
+/** 開発者向けの記録。利用者向けの表示には技術的な詳細を出さない */
+export function reportError(context: string, e: unknown): ErrorCategory {
+  const category = classifyError(e);
+  if (category !== 'input') console.error(`[WorkCore] ${context}（分類: ${category}）`, e);
+  return category;
 }
 
 /**

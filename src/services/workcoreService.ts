@@ -195,6 +195,40 @@ export class WorkCoreService {
     });
   }
 
+  /**
+   * 退職者の個人情報の整理 (Phase 11): 連絡先 (メール・電話・住所) と備考を削除する。
+   * 氏名・社員番号・所属・在籍期間は業務の記録 (タスク・資産の履歴・書類) との対応に必要なため残す。
+   * 退職済みの社員だけが対象。戻り値は「元に戻す」用 (通知の表示中だけ)
+   */
+  async erasePersonalData(employeeIds: string[]): Promise<{ employees: Employee[] }> {
+    const tx = this.db.transaction(['employees', 'activities'], 'readwrite');
+    return guardTx(tx, async () => {
+      const before: Employee[] = [];
+      for (const id of employeeIds) {
+        const e = await tx.objectStore('employees').get(id);
+        if (!e) continue;
+        if (e.status !== 'retired') return abortWith(tx, `${e.name}さんは退職済みではないため、個人情報を削除できません`);
+        if (!e.contact && !e.notes) continue;
+        before.push(e);
+        const { contact: _c, ...rest } = e;
+        await tx.objectStore('employees').put({ ...rest, notes: '', updatedAt: nowISO() });
+      }
+      if (before.length) await logActivity(tx, 'employee', 'erase', `退職者${before.length}名の連絡先・備考を削除しました（個人情報の整理）`);
+      return { employees: before };
+    });
+  }
+
+  async restorePersonalData(erased: { employees: Employee[] }): Promise<void> {
+    const tx = this.db.transaction(['employees', 'activities'], 'readwrite');
+    await guardTx(tx, async () => {
+      for (const e of erased.employees) {
+        const cur = await tx.objectStore('employees').get(e.id);
+        if (cur && !cur.contact && !cur.notes) await tx.objectStore('employees').put({ ...cur, contact: e.contact, notes: e.notes });
+      }
+      await logActivity(tx, 'employee', 'restore', `退職者${erased.employees.length}名の連絡先・備考の削除を取り消しました`);
+    });
+  }
+
   /** deleteEmployee の取り消し。社員番号が他で使われていた場合は復元しない */
   async restoreEmployee(deleted: DeletedEmployee): Promise<void> {
     const tx = this.db.transaction(['employees', 'tasks', 'activities', 'documents'], 'readwrite');

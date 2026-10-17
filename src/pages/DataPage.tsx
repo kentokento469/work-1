@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Boxes, Database, Download, FileJson, FileSpreadsheet, Headset, History, Lock, RefreshCcw, RotateCcw, SearchCheck, ShieldCheck, Trash2, Upload } from 'lucide-react';
+import { UserX, AlertTriangle, Boxes, Database, Download, FileJson, FileSpreadsheet, Headset, History, Lock, RefreshCcw, RotateCcw, SearchCheck, ShieldCheck, Trash2, Upload } from 'lucide-react';
 import { useAppData } from '../app/AppData';
 import { downloadText, timestampForFile } from '../app/download';
 import { createBackup, decodeBackupFiles, parseBackupText, type BackupFile } from '../data/backup';
@@ -29,6 +29,7 @@ const CATEGORY_OPTIONS: { value: '' | ActivityCategory; label: string }[] = [
   { value: 'rule', label: 'ルール' },
   { value: 'department', label: '部署' },
   { value: 'data', label: 'データ管理' },
+  { value: 'automation', label: '自動化' },
 ];
 
 const COUNT_LABEL: Record<keyof DataSnapshot, string> = {
@@ -87,6 +88,9 @@ export function DataPage() {
   const [integrity, setIntegrity] = useState<{ errors: string[]; repairs: string[] } | null>(null);
   const [checking, setChecking] = useState(false);
   const [persisted, setPersisted] = useState<boolean | null>(null);
+  // 個人情報の整理 (Phase 11): 退職済みで連絡先・備考が残っている社員
+  const retiredWithPersonal = data.employees.filter((e) => e.status === 'retired' && (e.contact || e.notes));
+  const [confirmErase, setConfirmErase] = useState(false);
   useEffect(() => {
     service.safety.info().then(setSafetyInfo).catch(() => setSafetyInfo(null));
   }, [service, data.activities]);
@@ -476,11 +480,29 @@ export function DataPage() {
         </Card>
       </div>
 
+      <Card className="mt-4" data-testid="privacy-card">
+        <CardHeader title="個人情報の整理" icon={UserX} description="不要になった個人情報を残さないための操作です" />
+        <div className="space-y-2 p-4 sm:p-5 text-sm">
+          <p>
+            退職済みで、連絡先（メール・電話・住所）または備考が残っている社員：
+            <strong data-testid="retired-personal-count">{retiredWithPersonal.length}名</strong>
+          </p>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            氏名・社員番号・所属・在籍期間は、タスク・資産の履歴・書類との対応に必要なため残します。操作履歴の文面に含まれる氏名は、最大300件の保存数を超えると古いものから自動で消えます。バックアップファイルに含まれる個人情報は、ファイル側で削除・暗号化してください。
+          </p>
+          {retiredWithPersonal.length > 0 && (
+            <Button variant="secondary" icon={UserX} onClick={() => setConfirmErase(true)} data-testid="erase-retired-personal">
+              退職者の連絡先・備考を削除（{retiredWithPersonal.length}名）
+            </Button>
+          )}
+        </div>
+      </Card>
+
       <Card className="mt-4">
         <CardHeader
           title="操作履歴"
           icon={History}
-          description={`直近${data.activities.length}件（最大300件まで保存）`}
+          description={`直近${data.activities.length}件（最大300件まで保存）。この端末内の記録で、改ざん・削除を防ぐ監査ログではありません`}
           action={<FilterSelect label="操作の種類" value={category} onChange={setCategory} options={CATEGORY_OPTIONS} className="w-40" />}
         />
         <div className="px-4 pb-4 pt-3 sm:px-5">
@@ -549,6 +571,23 @@ export function DataPage() {
         }
         onConfirm={() => (restoreCandidate ? run((s) => s.restoreBackup(restoreCandidate.backup, restoreCandidate.files), 'バックアップから復元しました') : undefined)}
         onClose={() => setRestoreCandidate(null)}
+      />
+      <ConfirmDialog
+        open={confirmErase}
+        danger
+        title="退職者の連絡先・備考を削除しますか？"
+        confirmLabel="削除する"
+        message={
+          <>
+            <p>次の{retiredWithPersonal.length}名の連絡先（メール・電話・住所）と備考を削除します。</p>
+            <p className="mt-1 text-xs">{retiredWithPersonal.map((e) => `${e.name}（${e.employeeNumber}）`).join('、')}</p>
+            <p className="mt-2 text-xs">削除の直後に表示される「元に戻す」で取り消せます。</p>
+          </>
+        }
+        onConfirm={() =>
+          run((s) => s.erasePersonalData(retiredWithPersonal.map((e) => e.id)), (r) => `退職者${r.employees.length}名の連絡先・備考を削除しました`, { undo: (r) => (s) => s.restorePersonalData(r) })
+        }
+        onClose={() => setConfirmErase(false)}
       />
       <ConfirmDialog
         open={confirmSafety}

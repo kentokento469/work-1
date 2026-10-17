@@ -15,7 +15,7 @@ import { pendingProposals, type AutomationProposal } from '../automation/engine'
 import type { DataSnapshot, Department, Employee } from '../domain/types';
 import { deriveNotices, isUnread, readNoticeState, type AppNotice, type NoticeState } from '../domain/notifications';
 import { AppError, WorkCoreService } from '../services/workcoreService';
-import { storageErrorMessage } from '../services/common';
+import { reportError, storageErrorMessage } from '../services/common';
 import { useToast } from '../ui/Toast';
 
 interface AppDataValue {
@@ -260,7 +260,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       } catch (e) {
         // 業務エラー以外 (保存領域の容量不足・接続切れなど) は、原因と次の操作が分かる説明にする
         const message = e instanceof AppError ? e.message : storageErrorMessage(e);
-        if (!(e instanceof AppError)) console.error(e);
+        reportError('操作の実行', e);
         toast.error(message);
         throw e instanceof AppError ? e : new AppError(message);
       }
