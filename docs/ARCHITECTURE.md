@@ -388,3 +388,11 @@ interface AssistProvider {
 - 点検と修復：`checkIntegrity`（バックアップの復元と同じ検査を現在のデータに実行）、`repairIntegrity`（任意の参照切れの関連付けを外す。変わったレコードだけ書き換える）
 - 移行：版ごとの段階的な移行（`db.ts` の方針コメント）。既存データを移行した場合は `pendingMigrationCheck` を記録し、最初の起動で `verifyMigration` が点検・修復して操作履歴に残す
 - 暗号化バックアップ：`data/backupCrypto.ts`（Web Crypto。PBKDF2-SHA256 600,000回 → AES-GCM 256ビット。salt・IV はランダム）。作成時に復号して一致を確認してから保存。パスワードは保存しない（忘れると復元不可）
+
+## 26. Phase 10：業務フロー・アクセシビリティ
+
+- 色：補足の文字の `--color-slate-400/500` をライト・ダークで別の値にし、背景に対して 4.5:1 以上（`index.css`）。全画面・主要なダイアログを axe-core で検査する E2E（`e2e/a11y.spec.ts`）を CI に組み込み、違反があれば公開しない
+- キーボード：`Layout` に「本文へスキップ」と `<main id="main" tabIndex={-1}>`。共通の `:focus-visible` の枠。`Modal` は開いているダイアログの積み重ね（`openPanels`）を持ち、一番上だけが Tab（中で循環）と Esc に応える
+- 名前と表示の一致：`aria-label` で見た目と違う名前を付けず、表示の文字＋`sr-only` の補足で名前を作る（グラフ・カレンダー・通知のベル）
+- ルーター：ダイアログを閉じたときの「履歴を1つ戻す」と画面移動の競合を解消（置き換え中は戻らない・予約の取り消し・`afterModalHistory` で URL の変更を戻り終わりの後に実行）。`useRoute` は購読開始時に最初の描画との差分に追いつく（Safari で起動直後の移動を取りこぼしていた）
+- 業務：発注書の承認で申請者本人を拒否（`transitionOrder`）。資産の返却で返却確認タスクを同時に完了（`returnAsset` の `completeTaskIds`）

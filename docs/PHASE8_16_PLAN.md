@@ -54,6 +54,7 @@ Phase 8 監査・品質保証基盤 ─┬─▶ Phase 9 データ整合性・�
 | 7 汎用タスク管理 | 完了（検証済み） | [PHASE7_RESULTS.md](PHASE7_RESULTS.md) |
 | 8 | 完了（検証済み） | [PHASE8_RESULTS.md](PHASE8_RESULTS.md) |
 | 9 | 完了（検証済み） | [PHASE9_RESULTS.md](PHASE9_RESULTS.md) |
-| 10 | 未着手（次に着手） | — |
-| 11〜13 | 未着手 | — |
+| 10 | 完了（検証済み） | [PHASE10_RESULTS.md](PHASE10_RESULTS.md) |
+| 11 | 未着手（次に着手） | — |
+| 12〜13 | 未着手 | — |
 | 14〜16 | 保留（Phase 13 の設計とオーナーの承認が必要） | — |
