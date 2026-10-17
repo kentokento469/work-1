@@ -396,3 +396,11 @@ interface AssistProvider {
 - 名前と表示の一致：`aria-label` で見た目と違う名前を付けず、表示の文字＋`sr-only` の補足で名前を作る（グラフ・カレンダー・通知のベル）
 - ルーター：ダイアログを閉じたときの「履歴を1つ戻す」と画面移動の競合を解消（置き換え中は戻らない・予約の取り消し・`afterModalHistory` で URL の変更を戻り終わりの後に実行）。`useRoute` は購読開始時に最初の描画との差分に追いつく（Safari で起動直後の移動を取りこぼしていた）
 - 業務：発注書の承認で申請者本人を拒否（`transitionOrder`）。資産の返却で返却確認タスクを同時に完了（`returnAsset` の `completeTaskIds`）
+
+## 27. Phase 11：セキュリティ・個人情報
+
+- CSP：本番ビルドで `index.html` に meta を挿入（`vite.config.ts` の `cspPlugin`）。`default-src 'self'`・`connect-src 'self' blob: data:`（外部通信の禁止）・`script-src 'self' blob: 'wasm-unsafe-eval'`（OCR のワーカーと WebAssembly）。テーマの初期化は `public/theme-init.js`（インラインのスクリプトを使わない）
+- 書類の元ファイルの種類は `safeDocumentMime`／`mimeForImport`（`domain/documents/safeMime.ts`）で対応形式に限定し、それ以外は `application/octet-stream`。保存・表示（blob: URL）・ダウンロード・バックアップの復元のすべてに適用
+- エラー：`classifyError`／`reportError`（`services/common.ts`）で分類し、技術的な詳細はコンソールだけに出す
+- 自動化の処理履歴 `AutomationRun.targets`（作成・変更した対象）。見送りは `undoDismissProposal` で取り消せる
+- 退職者の個人情報の整理：`erasePersonalData`／`restorePersonalData`（連絡先・備考を削除。氏名・社員番号は残す）

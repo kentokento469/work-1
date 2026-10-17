@@ -5,6 +5,7 @@
 > **Phase 2**：社内ヘルプデスク・問い合わせ自動分類・FAQ提案・タスク連携・分析、Phase 1 の UX 改善
 > **Phase 3**：在庫・備品・IT資産・購買管理、社員・ヘルプデスクとの連携、自動化エンジン（提案 → 承認 → 実行 → 履歴）
 > **Phase 4**：書類管理（請求書・領収書・納品書・見積書・申請書）、端末内OCR・PDF解析、確認・修正、重複検出、CSV出力
+> **Phase 11**：セキュリティと個人情報（CSP で外部通信・インラインスクリプトを禁止、書類の原本を開く XSS の経路を修正、エラーの技術的な詳細を利用者に見せない、退職者の連絡先の削除、自動化の処理履歴から対象へ・見送りの取り消し）
 > **Phase 10**：業務フローとアクセシビリティ（WCAG 2.2 AA の自動検査を全画面に導入し違反 0、キーボード操作・本文へスキップ・ダイアログのフォーカス、Safari で画面移動が取り消される不具合を修正、発注の本人承認の防止、資産の返却とタスクの同時完了、各業務の次の作業への導線）
 > **Phase 9**：データの保護と復旧（社員を削除しても完了済みタスクを履歴として残す、複数タブの変更の自動反映と同時編集の競合検出、復元・初期化・全削除の前の自動退避と「直前のデータに戻す」、データの点検と修復、パスワードで暗号化したバックアップ、保存容量不足などの説明、移行後の自動点検）
 > **Phase 8**：全体監査と品質保証基盤（削除後にバックアップが復元できない不具合・復元失敗時の部分書き込みを修正、エラー境界、日付変更への追従、CI に E2E を追加し失敗時は公開しない、E2E の日時固定）
@@ -203,7 +204,7 @@ UI層 (React + Tailwind)        pages/ features/ ui/   … 表示と入力のみ
 | --- | --- |
 | TypeScript 型チェック | ✅ エラー 0 |
 | 本番ビルド | ✅ 初回 JS gzip 173KB＋画面ごとの分割チャンク（PDF.js・OCR・電話番号ライブラリは必要時のみ読み込み） |
-| 単体・結合テスト（Vitest） | ✅ 226 / 226（Phase 1〜4・ダッシュボード改善: 146、Phase 5: 28、Phase 6〜6.1: 10、Phase 7: 18、Phase 8: 6、Phase 9: 17、Phase 10: 1） |
+| 単体・結合テスト（Vitest） | ✅ 233 / 233（Phase 1〜4・ダッシュボード改善: 146、Phase 5: 28、Phase 6〜6.1: 10、Phase 7: 18、Phase 8: 6、Phase 9: 17、Phase 10: 1、Phase 11: 7） |
 | E2E（Playwright, iPhone 13 相当 + デスクトップ） | ✅ 105 / 105（固定日時で実行。Phase 10 のアクセシビリティ〔WCAG 2.2 AA 自動検査・キーボード・リフロー〕と業務フロー、Phase 9 のデータ保護・復旧、Phase 8 の異常系、Phase 7 の検証項目1〜14、Phase 6.1 の通知の約束、Phase 6 の検証 A〜D、Phase 5 の検証項目1〜15を含む） |
 | 実ブラウザでの DB マイグレーション（Phase 1→2、2→3、3→4、4→5、6→7） | ✅ 合格（手順は e2e/migration.spec.ts 冒頭） |
 | 依存パッケージ脆弱性（npm audit） | ✅ 0件 |
@@ -237,6 +238,7 @@ npm run test:e2e     # E2E（Chromium のパスは CHROMIUM_PATH で指定可）
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | システム構成・データモデル・マイグレーション・状態遷移 |
 | [docs/META_DESIGN.md](docs/META_DESIGN.md) | メタ理解設計：参考資料、抽出した原理、採用・不採用の理由、検証結果 |
 | [docs/UX_AUDIT.md](docs/UX_AUDIT.md) | UX 監査と改善（Phase 1〜3） |
+| [docs/PHASE11_RESULTS.md](docs/PHASE11_RESULTS.md) | Phase 11：OWASP を参考にした監査・クライアントだけでは防げない問題・操作履歴と監査ログ・個人情報の一覧・エラーの分類 |
 | [docs/PHASE10_RESULTS.md](docs/PHASE10_RESULTS.md) | Phase 10：業務フローの監査（操作数の改善前後）・利用者像・アクセシビリティ（WCAG 2.2 AA）・Safari の画面移動の不具合 |
 | [docs/PHASE9_RESULTS.md](docs/PHASE9_RESULTS.md) | Phase 9：データ整合性・保護・復旧（削除方針・競合・退避・点検・暗号化・移行） |
 | [docs/PHASE8_RESULTS.md](docs/PHASE8_RESULTS.md) | Phase 8：全体監査・リスク一覧（P0〜P3）・テストマトリクス・品質基準・CI |
