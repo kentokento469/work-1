@@ -53,7 +53,7 @@ test('[Phase12] 営業日の設定：会社の休業日を追加すると、祝�
   await gotoHash(page, '#/settings');
   const card = page.getByTestId('calendar-settings');
   await expect(card).toContainText('これからの祝日');
-  await expect(card).toContainText('スポーツの日');
+  await expect(card).toContainText('2026/11/3(火) 文化の日');
   // 2026/10/16(金) を休業日に → 問い合わせの対応期限 (受付から営業日で数える) が休業日を避ける
   await card.getByTestId('company-holiday-input').fill('2026-10-16');
   await card.getByTestId('company-holiday-add').click();
