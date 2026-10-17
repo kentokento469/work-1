@@ -71,6 +71,12 @@ jobs:
       - run: npx playwright test --project=webkit-iphone
         env:
           PW_WEBKIT: '1'
+      # WebKit は開発環境で再現できないため、失敗時の画面の状態 (アクセシビリティツリー) をログに出して原因を調べる
+      - if: failure()
+        run: |
+          for f in $(find test-results -name error-context.md); do
+            echo "::group::$f"; head -c 6000 "$f"; echo; echo "::endgroup::"
+          done
 
   deploy:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
