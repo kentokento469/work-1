@@ -100,6 +100,17 @@ for (const scheme of ['light', 'dark'] as const) {
     await page.getByTestId('task-details').locator('summary').click();
     await scan(page, 'タスクの作成ダイアログ（詳細を開いた状態）', found, '[role="dialog"]');
     await page.keyboard.press('Escape');
+    // 確認ダイアログ (危険な操作)
+    await gotoHash(page, `#/employees/${emp}`);
+    await page.getByRole('button', { name: '削除' }).first().click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await scan(page, '社員の削除の確認ダイアログ', found, '[role="dialog"]');
+    await page.keyboard.press('Escape');
+    await gotoHash(page, '#/data');
+    await page.getByTestId('reset-demo').click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await scan(page, 'デモデータの初期化の確認ダイアログ', found, '[role="dialog"]');
+    await page.keyboard.press('Escape');
     // 入力エラーの表示
     await gotoHash(page, '#/helpdesk/new');
     await page.getByRole('button', { name: /受け付ける|登録|送信/ }).last().click();
