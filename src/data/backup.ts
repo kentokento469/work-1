@@ -31,6 +31,7 @@ import {
   type InquiryCategory,
   type OnboardingRule,
   type Task,
+  type TaskLinkKind,
 } from '../domain/types';
 
 export const BACKUP_APP_ID = 'WorkCore';
@@ -164,7 +165,7 @@ function checkTask(v: unknown): v is Task {
     (v.seriesId === undefined || isStrOrNull(v.seriesId)) &&
     (v.nextOccurrenceId === undefined || isStrOrNull(v.nextOccurrenceId)) &&
     (v.dependsOn === undefined || isStrArr(v.dependsOn)) &&
-    (v.links === undefined || (Array.isArray(v.links) && v.links.every((l) => isObj(l) && isStr(l.kind) && isStr(l.id)))) &&
+    (v.links === undefined || (Array.isArray(v.links) && v.links.every((l) => isObj(l) && isStr(l.kind) && LINK_KINDS.includes(l.kind) && isStr(l.id)))) &&
     // Phase 9 の項目
     (v.formerEmployee === undefined || v.formerEmployee === null || (isObj(v.formerEmployee) && isStr(v.formerEmployee.id) && isStr(v.formerEmployee.name) && isStr(v.formerEmployee.employeeNumber)))
   );
@@ -287,7 +288,10 @@ const checkPo = (v: unknown) =>
   v.lines.every((l) => isObj(l) && isStr(l.id) && isStr(l.itemId) && isInt(l.quantity) && l.quantity > 0 && isNum(l.unitPrice) && isInt(l.receivedQuantity) && l.receivedQuantity >= 0 && l.receivedQuantity <= l.quantity) &&
   isStr(v.createdAt) && isStr(v.updatedAt) && isStrOrNull(v.approvedAt);
 const checkEquipmentRule = (v: unknown) => isObj(v) && isStr(v.id) && isStr(v.scope) && isStr(v.itemId) && isInt(v.quantity) && v.quantity > 0 && typeof v.enabled === 'boolean' && isNum(v.order);
-const checkRun = (v: unknown) => isObj(v) && isStr(v.id) && isStr(v.automationId) && isStr(v.key) && isStr(v.status) && isStr(v.title) && isStrArr(v.results) && isStrOrNull(v.error) && isStr(v.at);
+const RUN_TARGET_KINDS = ['task', 'asset', 'item', 'employee', 'inquiry'];
+const checkRun = (v: unknown) =>
+  isObj(v) && isStr(v.id) && isStr(v.automationId) && isStr(v.key) && isStr(v.status) && isStr(v.title) && isStrArr(v.results) && isStrOrNull(v.error) && isStr(v.at) &&
+  (v.targets === undefined || (Array.isArray(v.targets) && v.targets.every((t) => isObj(t) && isStr(t.kind) && RUN_TARGET_KINDS.includes(t.kind) && isStr(t.id))));
 
 const isStrRecord = (v: unknown) => isObj(v) && Object.entries(v).every(([k, x]) => (FIELD_KEYS as readonly string[]).includes(k) && isStr(x));
 const checkDocument = (v: unknown) =>
@@ -300,6 +304,8 @@ const checkDocument = (v: unknown) =>
   Array.isArray(v.history) && isStr(v.createdAt) && isStr(v.updatedAt) && isStrOrNull(v.deletedAt);
 
 const MAX_ERRORS = 10;
+/** 関連データの種類 (未知の種類はリンクを作れないため取り込まない。Phase 11 の入力検証) */
+const LINK_KINDS: string[] = ['item', 'purchaseOrder', 'document', 'asset', 'inquiry', 'employee'] satisfies TaskLinkKind[];
 
 export function validateBackup(raw: unknown): BackupValidation {
   const errors: string[] = [];

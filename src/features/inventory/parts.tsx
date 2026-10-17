@@ -168,7 +168,12 @@ export function ProposalCard({ proposal, compact, forceOpen }: { proposal: Autom
             <Button
               variant="ghost"
               disabled={busy}
-              onClick={() => run((s) => s.inventory.dismissProposal(proposal.automationId, proposal.key, proposal.title), '提案を見送りました（処理履歴に記録）').catch(() => undefined)}
+              onClick={() =>
+                run((s) => s.inventory.dismissProposal(proposal.automationId, proposal.key, proposal.title), '提案を見送りました（処理履歴に記録）', {
+                  undo: (runId) => (s) => s.inventory.undoDismissProposal(runId),
+                  undoMessage: '見送りを取り消しました（提案がまた表示されます）',
+                }).catch(() => undefined)
+              }
             >
               見送る
             </Button>

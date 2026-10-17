@@ -16,7 +16,7 @@ import { addDays, today as todayISO } from '../domain/date';
 import { generateId, nowISO } from '../domain/id';
 import { computeAllStock, computeStockStatus, validateItem, validateQuantity, type ItemInput } from '../domain/inventory/stock';
 import { planSuggestionSync } from '../domain/inventory/suggestions';
-import { ASSET_STATUS_LABEL, PO_STATUS_LABEL, type Asset, type AssetEvent, type AssetStatus, type EquipmentRule, type Item, type PurchaseOrder, type Reservation, type StockMovement, type Supplier } from '../domain/inventory/types';
+import { ASSET_STATUS_LABEL, PO_STATUS_LABEL, type Asset, type AssetEvent, type AssetStatus, type EquipmentRule, type Item, type PurchaseOrder, type Reservation, type RunTarget, type StockMovement, type Supplier } from '../domain/inventory/types';
 import type { DataSnapshot, Task } from '../domain/types';
 import { ALL_AUTOMATIONS } from '../automation/registry';
 import { type AutomationAction } from '../automation/engine';
@@ -949,10 +949,17 @@ export class InventoryService {
         // 自動実行は、承認が不要な操作 (タスク作成など) だけで構成された提案に限る
         if (opts.auto && selected.some((a) => a.requiresApproval)) throw new AppError('承認が必要な操作を含むため、自動では実行できません');
         const results: string[] = [];
-        for (const a of selected) results.push(await this.execute(tx, a, proposal.inquiryId ?? null));
+        const targets: RunTarget[] = [];
+        for (const a of selected) {
+          const r = await this.execute(tx, a, proposal.inquiryId ?? null);
+          results.push(r.text);
+          if (r.target) targets.push(r.target);
+        }
+        if (proposal.employeeId) targets.unshift({ kind: 'employee', id: proposal.employeeId });
+        if (proposal.inquiryId) targets.unshift({ kind: 'inquiry', id: proposal.inquiryId });
         await this.syncSuggestions(tx);
         if (proposal.inquiryId) await appendInquiryEvent(tx, proposal.inquiryId, inquiryEvent('task', `自動化「${def.name}」を承認：${results.join('／')}`));
-        await tx.objectStore('automationRuns').add({ id: generateId('run'), automationId, key, status: opts.auto ? 'auto' : 'applied', title: proposal.title, results, error: null, at: nowISO() });
+        await tx.objectStore('automationRuns').add({ id: generateId('run'), automationId, key, status: opts.auto ? 'auto' : 'applied', title: proposal.title, results, targets, error: null, at: nowISO() });
         await logActivity(tx, 'automation', opts.auto ? 'auto' : 'apply', `自動化「${def.name}」を${opts.auto ? '自動で' : ''}実行しました：${proposal.title}（${results.length}件）`);
         return { results };
       });
@@ -967,23 +974,36 @@ export class InventoryService {
     }
   }
 
-  async dismissProposal(automationId: string, key: string, title: string): Promise<void> {
-    await this.run(ALL, async (tx) => {
-      await tx.objectStore('automationRuns').add({ id: generateId('run'), automationId, key, status: 'dismissed', title, results: ['担当者が見送り'], error: null, at: nowISO() });
+  /** 見送り。戻り値の ID で取り消せる (見送りの記録を消すと、同じ提案がまた表示される。Phase 11) */
+  async dismissProposal(automationId: string, key: string, title: string): Promise<string> {
+    return this.run(ALL, async (tx) => {
+      const id = generateId('run');
+      await tx.objectStore('automationRuns').add({ id, automationId, key, status: 'dismissed', title, results: ['担当者が見送り'], error: null, at: nowISO() });
       await logActivity(tx, 'automation', 'dismiss', `自動化の提案を見送りました：${title}`);
+      return id;
     });
   }
 
-  private async execute(tx: WriteTx, a: AutomationAction, inquiryId: string | null): Promise<string> {
+  async undoDismissProposal(runId: string): Promise<void> {
+    await this.run(ALL, async (tx) => {
+      const r = await tx.objectStore('automationRuns').get(runId);
+      if (!r || r.status !== 'dismissed') throw new AppError('見送りの記録が見つかりません');
+      await tx.objectStore('automationRuns').delete(runId);
+      await logActivity(tx, 'automation', 'undismiss', `自動化の提案の見送りを取り消しました：${r.title}`);
+    });
+  }
+
+  /** 1つの操作を実行し、結果の説明と、作成・変更した対象 (処理履歴から開くため。Phase 11) を返す */
+  private async execute(tx: WriteTx, a: AutomationAction, inquiryId: string | null): Promise<{ text: string; target?: RunTarget }> {
     const now = nowISO();
     switch (a.kind) {
       case 'reserve_asset': {
         const asset = await this.reserveInTx(tx, a.assetId, a.employeeId);
-        return `${asset.assetNumber} を予約`;
+        return { text: `${asset.assetNumber} を予約`, target: { kind: 'asset', id: asset.id } };
       }
       case 'loan_asset': {
         const asset = await this.assignInTx(tx, a.assetId, a.employeeId, a.inquiryId, true);
-        return `代替機 ${asset.assetNumber} を貸出`;
+        return { text: `代替機 ${asset.assetNumber} を貸出`, target: { kind: 'asset', id: asset.id } };
       }
       case 'reserve_item':
       case 'backorder_item': {
@@ -1006,7 +1026,7 @@ export class InventoryService {
           updatedAt: now,
         };
         await tx.objectStore('reservations').add(r);
-        return `${item.name} ${a.quantity}${item.unit} を${a.kind === 'reserve_item' ? '予約' : '入荷待ちとして記録'}`;
+        return { text: `${item.name} ${a.quantity}${item.unit} を${a.kind === 'reserve_item' ? '予約' : '入荷待ちとして記録'}`, target: { kind: 'item', id: item.id } };
       }
       case 'release_reservation': {
         const r = await tx.objectStore('reservations').get(a.reservationId);
@@ -1016,25 +1036,26 @@ export class InventoryService {
           await tx.objectStore('reservations').put({ ...r, quantity: r.quantity - a.quantity, updatedAt: now });
           await tx.objectStore('reservations').add({ ...r, id: generateId('rsv'), quantity: a.quantity, status: 'released', createdAt: now, updatedAt: now });
         } else await tx.objectStore('reservations').put({ ...r, status: 'released', updatedAt: now });
-        return `予約（${r.purpose}）を ${a.quantity} 解除`;
+        return { text: `予約（${r.purpose}）を ${a.quantity} 解除`, target: { kind: 'item', id: r.itemId } };
       }
       case 'release_asset': {
         const asset = await tx.objectStore('assets').get(a.assetId);
         if (!asset || asset.status !== 'reserved') throw new AppError('資産の予約が既に処理されています');
         await this.changeAsset(tx, asset, { status: 'unused', assigneeId: null, assigneeName: '', departmentId: null }, 'release', `${asset.assigneeName}さんの予約を解除（自動化）`);
-        return `${asset.assetNumber} の予約を解除`;
+        return { text: `${asset.assetNumber} の予約を解除`, target: { kind: 'asset', id: asset.id } };
       }
       case 'set_asset_status': {
         const asset = await tx.objectStore('assets').get(a.assetId);
         if (!asset) throw new AppError('資産が見つかりません');
         await this.changeAsset(tx, asset, { status: a.status }, 'status', a.note, a.inquiryId ?? inquiryId);
-        return `${asset.assetNumber} を「${ASSET_STATUS_LABEL[a.status]}」に変更`;
+        return { text: `${asset.assetNumber} を「${ASSET_STATUS_LABEL[a.status]}」に変更`, target: { kind: 'asset', id: asset.id } };
       }
       case 'create_onboarding_task': {
         const exists = (await tx.objectStore('tasks').index('byEmployee').getAll(a.employeeId)).some((t) => t.ruleId === a.ruleId);
-        if (exists) return `タスク「${a.title}」は作成済みのためスキップ`;
+        if (exists) return { text: `タスク「${a.title}」は作成済みのためスキップ` };
+        const onboardingTaskId = generateId('task');
         await tx.objectStore('tasks').add({
-          id: generateId('task'),
+          id: onboardingTaskId,
           employeeId: a.employeeId,
           title: a.title,
           description: a.description,
@@ -1050,11 +1071,11 @@ export class InventoryService {
           updatedAt: now,
           completedAt: null,
         });
-        return `タスク「${a.title}」を作成`;
+        return { text: `タスク「${a.title}」を作成`, target: { kind: 'task', id: onboardingTaskId } };
       }
       case 'create_task': {
         const exists = (await tx.objectStore('tasks').getAll()).some((t) => t.ruleId === a.ruleKey);
-        if (exists) return `タスク「${a.title}」は作成済みのためスキップ`;
+        if (exists) return { text: `タスク「${a.title}」は作成済みのためスキップ` };
         const task: Task = {
           id: generateId('task'),
           employeeId: a.employeeId,
@@ -1074,7 +1095,7 @@ export class InventoryService {
           completedAt: null,
         };
         await tx.objectStore('tasks').add(task);
-        return `タスク「${a.title}」を作成`;
+        return { text: `タスク「${a.title}」を作成`, target: { kind: 'task', id: task.id } };
       }
     }
   }

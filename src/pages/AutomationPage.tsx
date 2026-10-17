@@ -8,6 +8,8 @@ import { useQueryState } from '../app/hooks';
 import { ALL_AUTOMATIONS } from '../automation/registry';
 import { readAutomationSettings, ruleSetting, type RuleMode } from '../automation/settings';
 import { formatDateTimeJa } from '../domain/date';
+import type { RunTarget } from '../domain/inventory/types';
+import type { DataSnapshot } from '../domain/types';
 import { ProposalCard } from '../features/inventory/parts';
 import { Badge, Card, CardHeader, EmptyState, FilterSelect, PageHeader } from '../ui/primitives';
 import { MissingTargetNotice, TargetNotices } from '../ui/notices';
@@ -129,6 +131,16 @@ export function AutomationPage({ query }: { query: URLSearchParams }) {
                 </div>
                 {r.error && <p className="mt-0.5 pl-6 text-xs text-red-600 dark:text-red-400">{r.error}（変更はすべて取り消されました）</p>}
                 {r.results.length > 0 && <p className="mt-0.5 pl-6 text-xs text-slate-500">{r.results.join('／')}</p>}
+                {/* 作成・変更した対象を開く (Phase 11。それ以前の記録には対象の記録がない) */}
+                {!!r.targets?.length && (
+                  <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1 pl-6" data-testid="run-targets">
+                    {r.targets.map((t) => (
+                      <a key={`${t.kind}:${t.id}`} href={runTargetHref(t)} className="inline-flex min-h-8 items-center text-xs font-semibold text-navy-600 underline-offset-2 hover:underline dark:text-navy-300">
+                        {runTargetLabel(t, data)}
+                      </a>
+                    ))}
+                  </p>
+                )}
                 <p className="pl-6 text-[11px] text-slate-400">{formatDateTimeJa(r.at)}</p>
               </li>
             ))}
@@ -137,4 +149,46 @@ export function AutomationPage({ query }: { query: URLSearchParams }) {
       </Card>
     </>
   );
+}
+
+function runTargetHref(t: RunTarget): string {
+  const id = encodeURIComponent(t.id);
+  switch (t.kind) {
+    case 'task':
+      return `#/tasks?status=all&focus=${id}`;
+    case 'asset':
+      return `#/inventory/assets/${id}`;
+    case 'item':
+      return `#/inventory/items/${id}`;
+    case 'employee':
+      return `#/employees/${id}`;
+    case 'inquiry':
+      return `#/helpdesk/${id}`;
+  }
+}
+
+/** 対象の表示名。削除済みの対象は「（削除済み）」 */
+function runTargetLabel(t: RunTarget, data: DataSnapshot): string {
+  switch (t.kind) {
+    case 'task': {
+      const x = data.tasks.find((v) => v.id === t.id);
+      return x ? `タスク：${x.title}` : 'タスク（削除済み）';
+    }
+    case 'asset': {
+      const x = data.assets.find((v) => v.id === t.id);
+      return x ? `資産：${x.assetNumber}` : '資産（削除済み）';
+    }
+    case 'item': {
+      const x = data.items.find((v) => v.id === t.id);
+      return x ? `品目：${x.name}` : '品目（削除済み）';
+    }
+    case 'employee': {
+      const x = data.employees.find((v) => v.id === t.id);
+      return x ? `社員：${x.name}` : '社員（削除済み）';
+    }
+    case 'inquiry': {
+      const x = data.inquiries.find((v) => v.id === t.id);
+      return x ? `問い合わせ：${x.number}` : '問い合わせ（削除済み）';
+    }
+  }
 }

@@ -287,7 +287,14 @@ export interface AutomationRun {
   status: AutomationRunStatus;
   title: string;
   results: string[];
+  /** 作成・変更した対象 (処理履歴から開くため。Phase 11。それ以前の記録には無い) */
+  targets?: RunTarget[];
   error: string | null;
   at: ISODateTime;
+}
+
+export interface RunTarget {
+  kind: 'task' | 'asset' | 'item' | 'employee' | 'inquiry';
+  id: string;
 }
 
