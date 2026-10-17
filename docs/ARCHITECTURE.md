@@ -404,3 +404,11 @@ interface AssistProvider {
 - エラー：`classifyError`／`reportError`（`services/common.ts`）で分類し、技術的な詳細はコンソールだけに出す
 - 自動化の処理履歴 `AutomationRun.targets`（作成・変更した対象）。見送りは `undoDismissProposal` で取り消せる
 - 退職者の個人情報の整理：`erasePersonalData`／`restorePersonalData`（連絡先・備考を削除。氏名・社員番号は残す）
+
+## 28. Phase 12：性能・日付処理
+
+- 索引 `buildIndex`（`domain/dataIndex.ts`）を `AppData` の `index` として提供。一覧の各行は ID で引く（件数 × 件数の探索をしない）
+- 段階表示 `usePaged`／`ShowMore`（`ui/ShowMore.tsx`）：100件ずつ。絞り込みの変更で先頭から。`mustInclude` で通知などの対象を必ず表示
+- 営業日 `domain/calendar.ts`：日本の祝日（規則から計算）・会社の休業日（設定 `settings` の id `calendar`）・営業日の計算。`AppData` がデータの読み込みごとに `setBusinessCalendar` で反映し、期限の計算はこの設定を使う
+- 繰り返し `Recurrence.adjust`（休みの日の調整）・`basis`（完了日基準）・`lastRaw`（調整前の予定日。次回の起点）。`nextScheduledDue`
+- 性能の計測 `e2e/perf.spec.ts`（`PERF=1` のときだけ実行）
