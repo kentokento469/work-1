@@ -112,7 +112,7 @@ test('[Phase7] 5〜6. プロジェクト（作成・タスク追加・完了率�
   await page.getByTestId('project-new').click();
   await page.getByRole('dialog').getByLabel('プロジェクト名').fill('E2E案件');
   await page.getByRole('dialog').getByTestId('project-save').click();
-  await page.locator('[data-project-name="E2E案件"] button').first().click();
+  // Phase 10: 作成したプロジェクトがそのまま開く (一覧から探して開き直す操作が不要)
   await expect(page.getByTestId('project-context')).toContainText('E2E案件');
   // プロジェクトを開いた状態のクイック追加は、そのプロジェクトに入る
   await page.getByTestId('quick-add-input').fill('見積を取得する');

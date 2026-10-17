@@ -23,6 +23,7 @@ import { PRIORITIES, PRIORITY_LABEL, type Priority } from '../domain/types';
 import { RulesPanel } from '../features/RulesPanel';
 import { EmployeeStatusBadge, PriorityBadge } from '../ui/badges';
 import { AppError } from '../services/workcoreService';
+import { proposalFocusId } from '../domain/notifications';
 import { Badge, Button, Card, CardHeader, EmptyState, PageHeader, SelectField, cx } from '../ui/primitives';
 
 export function OnboardingPage({ query }: { query: URLSearchParams }) {
@@ -71,13 +72,14 @@ const FLOW = [
 ];
 
 function GeneratePanel({ employeeId }: { employeeId: string }) {
-  const { data, service, run, empById, deptById, today } = useAppData();
+  const { data, service, run, empById, deptById, today, proposals } = useAppData();
   const employee = employeeId ? empById.get(employeeId) : undefined;
   const [plan, setPlan] = useState<OnboardingPlan | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
   const [overrides, setOverrides] = useState<Record<string, PlanItemOverride>>({});
   const [applying, setApplying] = useState(false);
   const [result, setResult] = useState<{ count: number; name: string; id: string } | null>(null);
+  const equipmentProposal = result ? proposals.find((p) => p.automationId === 'onboarding-equipment' && p.employeeId === result.id) : undefined;
   const [showSkipped, setShowSkipped] = useState(false);
 
   const candidates = useMemo(
@@ -216,6 +218,12 @@ function GeneratePanel({ employeeId }: { employeeId: string }) {
                 <Button size="sm" onClick={() => navigate(`/tasks?employee=${result.id}&status=all`)}>
                   タスクを確認
                 </Button>
+                {/* 入社準備の次の作業 (必要な機器の予約・発注) の提案があれば、その場から開けるようにする (Phase 10) */}
+                {equipmentProposal && (
+                  <Button size="sm" variant="secondary" onClick={() => navigate(`/automation?focus=${encodeURIComponent(proposalFocusId(equipmentProposal))}`)} data-testid="onboarding-next-equipment">
+                    必要な機器の提案を確認
+                  </Button>
+                )}
                 <Button size="sm" variant="secondary" onClick={() => navigate('/')}>
                   ダッシュボードへ
                 </Button>

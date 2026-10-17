@@ -256,7 +256,10 @@ export function AssignSheet({ asset, onClose }: { asset: Asset | null; onClose: 
 }
 
 export function ReturnSheet({ asset, onClose }: { asset: Asset | null; onClose: () => void }) {
-  const { run } = useAppData();
+  const { run, data } = useAppData();
+  // この資産の未完了の返却確認タスク (退職の自動化で作成)。返却と同時に完了にできる
+  const returnTasks = asset ? data.tasks.filter((t) => t.assetId === asset.id && t.status !== 'done' && (t.ruleId ?? '').startsWith('return:')) : [];
+  const [completeTasks, setCompleteTasks] = useState(true);
   const [condition, setCondition] = useState<'unused' | 'repair' | 'broken'>('unused');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
@@ -266,13 +269,18 @@ export function ReturnSheet({ asset, onClose }: { asset: Asset | null; onClose: 
       setCondition('unused');
       setNote('');
       setRequestId(generateId('req'));
+      setCompleteTasks(true);
     }
   }, [asset]);
   if (!asset) return null;
   const submit = async () => {
     setBusy(true);
     try {
-      await run((s) => s.inventory.returnAsset(asset.id, condition, note, requestId), (r) => (r.duplicated ? '処理済みです（二重処理を防止しました）' : `${asset.assetNumber} の返却を記録しました`));
+      const completeTaskIds = completeTasks ? returnTasks.map((t) => t.id) : [];
+      await run(
+        (s) => s.inventory.returnAsset(asset.id, condition, note, requestId, { completeTaskIds }),
+        (r) => (r.duplicated ? '処理済みです（二重処理を防止しました）' : `${asset.assetNumber} の返却を記録しました${completeTaskIds.length ? `（返却確認タスク${completeTaskIds.length}件を完了）` : ''}`),
+      );
       onClose();
     } catch {
       /* トースト表示済み */
@@ -312,6 +320,15 @@ export function ReturnSheet({ asset, onClose }: { asset: Asset | null; onClose: 
         </div>
       </fieldset>
       <TextAreaField label="メモ（任意）" value={note} onChange={(e) => setNote(e.target.value)} rows={2} wrapClassName="mt-4" maxLength={500} placeholder="例：初期化済み・付属品あり" />
+      {returnTasks.length > 0 && (
+        <label className="mt-4 flex min-h-11 cursor-pointer items-start gap-2 rounded-lg bg-slate-50 p-3 text-sm dark:bg-navy-950">
+          <input type="checkbox" className="mt-0.5 size-5 shrink-0 accent-navy-700" checked={completeTasks} onChange={(e) => setCompleteTasks(e.target.checked)} data-testid="return-complete-task" />
+          <span>
+            返却確認タスクも完了にする（データの消去・初期化を確認済み）
+            <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">{returnTasks.map((t) => t.title).join('、')}</span>
+          </span>
+        </label>
+      )}
     </Modal>
   );
 }

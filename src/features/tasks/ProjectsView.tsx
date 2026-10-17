@@ -2,7 +2,8 @@
  * プロジェクト一覧: 完了率 (所属タスクの完了数 / 総数)・作成・編集・アーカイブ・削除。
  * 削除してもタスクは消さず、所属を外す (通知の「元に戻す」で再び所属させる)。
  */
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
+import { afterModalHistory } from '../../app/router';
 import { Archive, ArchiveRestore, FolderKanban, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useAppData } from '../../app/AppData';
 import type { Project } from '../../domain/types';
@@ -17,7 +18,7 @@ export function projectProgress(tasks: { projectId?: string | null; status: stri
   return { total: own.length, done, rate: own.length ? Math.round((done / own.length) * 100) : 0 };
 }
 
-export function ProjectFormModal({ open, onClose, project }: { open: boolean; onClose: () => void; project?: Project }) {
+export function ProjectFormModal({ open, onClose, project, onCreated }: { open: boolean; onClose: () => void; project?: Project; onCreated?: (p: Project) => void }) {
   const { run } = useAppData();
   const [name, setName] = useState(project?.name ?? '');
   const [desc, setDesc] = useState(project?.description ?? '');
@@ -27,8 +28,10 @@ export function ProjectFormModal({ open, onClose, project }: { open: boolean; on
     e.preventDefault();
     setBusy(true);
     try {
-      await run((s) => s.tasks.saveProject({ name, description: desc }, project?.id), project ? 'プロジェクトを更新しました' : `プロジェクト「${name.trim()}」を作成しました`);
+      const saved = await run((s) => s.tasks.saveProject({ name, description: desc }, project?.id), project ? 'プロジェクトを更新しました' : `プロジェクト「${name.trim()}」を作成しました`);
       onClose();
+      // 作成した直後は、そのプロジェクトを開いてタスクを追加できるようにする (次の作業は必ずタスクの追加。Phase 10)
+      if (!project) onCreated?.(saved);
     } catch (err) {
       if (err instanceof AppError) setError(err.fieldErrors.name ?? err.message);
     } finally {
@@ -49,6 +52,14 @@ export function ProjectsView({ onOpenProject }: { onOpenProject: (id: string) =>
   const { data, run } = useAppData();
   const [showArchived, setShowArchived] = useState(false);
   const [editing, setEditing] = useState<Project | 'new' | null>(null);
+  // 作成したプロジェクトは、作成のダイアログが閉じ終わってから開く (閉じる処理で画面の切り替えが取り消されないように)
+  const [openAfterClose, setOpenAfterClose] = useState<string | null>(null);
+  useEffect(() => {
+    if (editing || !openAfterClose) return;
+    const id = openAfterClose;
+    setOpenAfterClose(null);
+    afterModalHistory(() => onOpenProject(id));
+  }, [editing, openAfterClose, onOpenProject]);
   const list = data.projects.filter((p) => p.archived === showArchived).sort((a, b) => a.name.localeCompare(b.name, 'ja'));
   const unassigned = data.tasks.filter((t) => !t.projectId && t.status !== 'done').length;
   return (
@@ -104,7 +115,7 @@ export function ProjectsView({ onOpenProject }: { onOpenProject: (id: string) =>
         </ul>
       )}
       <p className="mt-3 px-1 text-xs text-slate-500">プロジェクトに属さない未完了タスク：{unassigned}件（リスト表示で確認できます）</p>
-      {editing && <ProjectFormModal open onClose={() => setEditing(null)} project={editing === 'new' ? undefined : editing} />}
+      {editing && <ProjectFormModal open onClose={() => setEditing(null)} project={editing === 'new' ? undefined : editing} onCreated={(p) => setOpenAfterClose(p.id)} />}
     </div>
   );
 }

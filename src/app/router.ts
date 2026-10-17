@@ -183,6 +183,22 @@ export function backTo(href: string): boolean {
 }
 
 let modalSeq = 0;
+
+function flushAfterModal() {
+  if (selfBack || pendingRelease) return;
+  const queued = afterSelfBack;
+  afterSelfBack = [];
+  queued.forEach((fn) => fn());
+}
+
+/**
+ * モーダルを閉じた直後に URL を変える処理 (絞り込みの変更など navigate 以外) を、閉じたときの「履歴を1つ戻す」が
+ * 終わってから実行する。先に URL を変えると、戻る処理でその変更が取り消されるため (Phase 10)
+ */
+export function afterModalHistory(fn: () => void): void {
+  if (selfBack || pendingRelease) afterSelfBack.push(fn);
+  else fn();
+}
 /** 直前に閉じたモーダルの履歴。同じ処理の中で開き直された (StrictMode の再実行・モーダルの切替) 場合は再利用する */
 let pendingRelease: { id: string; idx: number; cancelled: boolean } | null = null;
 
@@ -213,12 +229,14 @@ export function pushModalEntry(onHistoryBack: () => boolean): () => void {
     modalStack.splice(i, 1);
     // まだその履歴の上にいるなら1つ戻して取り除く (画面移動で置き換え済みなら何もしない)
     if ((history.state as EntryState | null)?.wcModal !== id) return;
+    // navigate() でこのモーダルの履歴を置き換えている最中 (Safari では置き換えの直後もしばらく history.state が古いまま) なら戻らない
+    if (replacing) return;
     const release = { id, idx, cancelled: false };
     pendingRelease = release;
     queueMicrotask(() => {
-      if (release.cancelled) return;
+      if (release.cancelled) return flushAfterModal();
       if (pendingRelease === release) pendingRelease = null;
-      if ((history.state as EntryState | null)?.wcModal !== id) return;
+      if ((history.state as EntryState | null)?.wcModal !== id || replacing) return flushAfterModal();
       selfBack = true;
       history.back();
       // popstate が届かない環境でも移動を止めたままにしない
@@ -241,9 +259,11 @@ const scrollPositions = new Map<string, number>();
 if (typeof history !== 'undefined' && 'scrollRestoration' in history) history.scrollRestoration = 'manual';
 
 export function useRoute(): Route {
-  const [route, setRoute] = useState(() => parseHash(window.location.hash));
+  const [initialHash] = useState(() => window.location.hash);
+  const [route, setRoute] = useState(() => parseHash(initialHash));
   useEffect(() => {
-    let currentPath = parseHash(window.location.hash).path;
+    // 描画した時点の画面から始める (描画から購読開始までの間に URL が変わった場合に、その変更を取りこぼさないため)
+    let currentPath = parseHash(initialHash).path;
     const onScroll = () => scrollPositions.set(currentPath, window.scrollY);
     const onChange = () => {
       const next = parseHash(window.location.hash);
@@ -287,6 +307,9 @@ export function useRoute(): Route {
     };
     window.addEventListener('hashchange', onChange);
     window.addEventListener('scroll', onScroll, { passive: true });
+    // 最初の描画から購読を始めるまでの間に移動していたら、ここで追いつく。
+    // Safari (WebKit) は描画後の処理 (useEffect) の実行が遅れることがあり、起動直後の移動が画面に反映されないことがあった (Phase 10)
+    if (window.location.hash !== initialHash) onChange();
     return () => {
       window.removeEventListener('hashchange', onChange);
       window.removeEventListener('scroll', onScroll);

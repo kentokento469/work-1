@@ -437,6 +437,9 @@ export function OrderDetailPage({ orderId }: { orderId: string }) {
   const [expected, setExpected] = useState('');
   const [requestId, setRequestId] = useState(() => generateId('req'));
   const [busy, setBusy] = useState(false);
+  // 申請者と承認者は別の欄として扱う: 状態が変わったら名前の入力を空にする (申請者の名前がそのまま承認者に入らないように)
+  const poStatus = po?.status;
+  useEffect(() => setActor(''), [poStatus]);
   useEffect(() => {
     if (!po) return;
     setReceive(Object.fromEntries(po.lines.map((l) => [l.id, l.quantity - l.receivedQuantity])));

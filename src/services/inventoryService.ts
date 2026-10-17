@@ -543,7 +543,7 @@ export class InventoryService {
   }
 
   /** 返却。状態 (正常→未使用 / 修理が必要 / 故障) を選べる */
-  async returnAsset(assetId: string, condition: 'unused' | 'repair' | 'broken', note: string, requestId?: string): Promise<OpResult<Asset>> {
+  async returnAsset(assetId: string, condition: 'unused' | 'repair' | 'broken', note: string, requestId?: string, opts: { completeTaskIds?: string[] } = {}): Promise<OpResult<Asset>> {
     return this.run(ALL, async (tx) => {
       if (await this.seen(tx, requestId)) return { duplicated: true } as const;
       const a = await tx.objectStore('assets').get(assetId);
@@ -558,6 +558,14 @@ export class InventoryService {
       );
       // 返却で未使用に戻った資産は、入荷待ちの予約があれば引き当てる
       if (condition === 'unused') await this.allocateBackordersForAsset(tx, next);
+      // 返却確認タスク (退職の自動化で作成) を、利用者が選んだ場合は同時に完了にする (返却と完了の二重入力をなくす。Phase 10)
+      for (const tid of opts.completeTaskIds ?? []) {
+        const t = await tx.objectStore('tasks').get(tid);
+        if (!t || t.assetId !== a.id || t.status === 'done') continue;
+        const now = nowISO();
+        await tx.objectStore('tasks').put({ ...t, status: 'done', updatedAt: now, completedAt: now });
+        await logActivity(tx, 'task', 'status', `タスク「${t.title}」を資産の返却とあわせて完了にしました`, t.id);
+      }
       await this.syncSuggestions(tx);
       await this.remember(tx, requestId);
       await logActivity(tx, 'asset', 'return', `資産 ${a.assetNumber} が返却されました（${ASSET_STATUS_LABEL[condition]}）`, a.id);
@@ -683,6 +691,9 @@ export class InventoryService {
       } else if (action === 'approve') {
         if (po.status !== 'pending_approval') throw new AppError('承認待ちの発注書だけ承認できます');
         if (!name) throw new AppError('承認者名を入力してください', { actor: '必須です' });
+        // 申請者本人による承認を防ぐ (職務の分離)。ログインがないため氏名の一致で判定する (空白の違いは無視)
+        const norm = (v: string | null | undefined) => (v ?? '').replace(/[\s　]/g, '');
+        if (po.requestedBy && norm(name) === norm(po.requestedBy)) throw new AppError(`申請者（${po.requestedBy}）本人は承認できません。別の担当者が承認してください`, { actor: '申請者とは別の人の名前を入力してください' });
         const sup = await tx.objectStore('suppliers').get(po.supplierId);
         next = this.poEvent({ ...po, status: 'approved', approvedBy: name, approvedAt: nowISO(), expectedDate: po.expectedDate ?? addDays(this.clock(), sup?.leadTimeDays ?? 7) }, `承認（${name}）。外部への発注はアプリ外で行います`);
       } else if (action === 'reject') {

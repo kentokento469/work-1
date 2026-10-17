@@ -18,6 +18,15 @@ export const test = base.extend({
     page.on('framenavigated', (f) => f === page.mainFrame() && trail.push(`nav ${f.url().replace(/^https?:\/\/[^/]+/, '')}`));
     page.on('console', (m) => (m.type() === 'error' || m.type() === 'warning') && trail.push(`${m.type()} ${m.text().slice(0, 200)}`));
     page.on('pageerror', (e) => trail.push(`pageerror ${e.message.slice(0, 200)}`));
+    // ダイアログを閉じた直後は、アプリが履歴を1つ戻している途中のことがある。その最中に再読み込みすると
+    // 再読み込みが中断される (ERR_ABORTED) ため、戻り終わるのを待ってから再読み込みする (最大2秒)
+    const reload = page.reload.bind(page);
+    page.reload = async (opts) => {
+      await page
+        .waitForFunction(() => !(history.state as { wcModal?: string } | null)?.wcModal, undefined, { timeout: 2000 })
+        .catch(() => undefined);
+      return reload(opts);
+    };
     await use(page);
     if (testInfo.status !== testInfo.expectedStatus) {
       const where = await page

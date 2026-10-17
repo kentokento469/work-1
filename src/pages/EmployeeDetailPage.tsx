@@ -89,7 +89,8 @@ export function EmployeeDetailPage({ employeeId }: { employeeId: string }) {
           <Button variant="secondary" icon={Trash2} className="text-red-600 dark:text-red-400" onClick={() => setDeleteOpen(true)}>
             削除
           </Button>
-          {emp.status !== 'retired' && (
+          {/* 退職予定 (退職日あり)・退職済みの社員には入社準備を出さない */}
+          {emp.status !== 'retired' && !emp.retireDate && (
             <Button icon={Zap} className="col-span-2" onClick={() => navigate(`/onboarding?employee=${emp.id}`)}>
               入社準備タスクを自動生成
             </Button>
