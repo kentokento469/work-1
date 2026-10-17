@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, ChevronLeft, ChevronRight, CloudDownload, Copy, HardDrive, ScanText, WifiOff } from 'lucide-react';
 import { useAppData } from '../../app/AppData';
+import { safeDocumentMime } from '../../domain/documents/safeMime';
 import { DUPLICATE_LEVEL_LABEL, type DuplicateMatch } from '../../domain/documents/duplicates';
 import {
   CERTAINTY_LABEL,
@@ -57,7 +58,8 @@ function ImagePreview({ file }: { file: DocumentFile }) {
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
-    const u = URL.createObjectURL(new Blob([file.data], { type: file.mime }));
+    // 表示してよい種類だけを指定する (SVG・HTML などをアプリと同じオリジンで開かない。Phase 11)
+    const u = URL.createObjectURL(new Blob([file.data], { type: safeDocumentMime(file.mime) }));
     setUrl(u);
     return () => URL.revokeObjectURL(u); // 画面を離れたら解放
   }, [file]);

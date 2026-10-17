@@ -10,6 +10,7 @@ import { Archive, Download, FileQuestion, FileText, History, Pencil, RotateCcw, 
 import { useAppData } from '../../app/AppData';
 import { navigate } from '../../app/router';
 import { formatDateTimeJa } from '../../domain/date';
+import { safeDocumentMime } from '../../domain/documents/safeMime';
 import { EXTRACTION_METHOD_LABEL, type DocumentRecord } from '../../domain/documents/types';
 import { formatBytes } from '../../features/documents/engine/assets';
 import { InventoryHandoffCard } from '../../features/documents/InventoryHandoff';
@@ -50,7 +51,7 @@ function Detail({ doc, autoProcess, keepType, run }: { doc: DocumentRecord; auto
 
   const download = () => {
     if (!file) return;
-    const url = URL.createObjectURL(new Blob([file.data], { type: file.mime }));
+    const url = URL.createObjectURL(new Blob([file.data], { type: safeDocumentMime(file.mime) }));
     const a = document.createElement('a');
     a.href = url;
     a.download = file.name;

@@ -14,6 +14,7 @@ import { formatBytes, storageEstimate } from '../../features/documents/engine/as
 import { decodeImage, fileKind, openPdf, releaseCanvas } from '../../features/documents/engine/media';
 import { OcrSetupCard } from '../../features/documents/parts';
 import { MAX_FILE_BYTES } from '../../services/documentService';
+import { mimeForImport } from '../../domain/documents/safeMime';
 import { ConfirmDialog } from '../../ui/Modal';
 import { Card, cx, PageHeader, SelectField } from '../../ui/primitives';
 
@@ -87,7 +88,7 @@ export function DocumentImportPage({ query }: { query: URLSearchParams }) {
         releaseCanvas(c);
       }
       const hash = await sha256Hex(buf);
-      const f = { name: file.name || `capture-${Date.now()}.jpg`, mime: file.type || (kind === 'pdf' ? 'application/pdf' : 'image/jpeg'), data: buf, hash, pageCount };
+      const f = { name: file.name || `capture-${Date.now()}.jpg`, mime: mimeForImport(kind, file.type), data: buf, hash, pageCount };
       const dup = data.documents.find((d) => !d.deletedAt && d.file?.hash === hash);
       if (dup) {
         setPending({ ...f, duplicate: dup, notice });

@@ -17,6 +17,7 @@ import { createDefaultInquiryCategories } from '../domain/helpdesk/defaults';
 import { emptyInventory } from '../domain/inventory/defaults';
 import { DOCUMENT_STATUSES, DOCUMENT_TYPES, EXTRACTION_METHODS, FIELD_KEYS, type DocumentFile } from '../domain/documents/types';
 import { sha256Hex } from '../domain/documents/hash';
+import { safeDocumentMime } from '../domain/documents/safeMime';
 import { ASSET_STATUSES, INVENTORY_CATEGORIES, MOVEMENT_TYPES, PO_STATUSES } from '../domain/inventory/types';
 import { isEmployeeStatus, isEmploymentType, isPriority, isTaskStatus, normalizeEmployeeNumber } from '../domain/validation';
 import {
@@ -96,7 +97,7 @@ export async function decodeBackupFiles(backup: BackupFile): Promise<{ ok: true;
     }
     if (buf.byteLength !== f.size) errors.push(`元ファイル「${f.name}」のサイズが記録と一致しません`);
     else if ((await sha256Hex(buf)) !== f.hash) errors.push(`元ファイル「${f.name}」の内容が記録（ハッシュ）と一致しません。ファイルが破損している可能性があります`);
-    else files.push({ id: f.id, documentId: f.documentId, name: f.name, mime: f.mime, size: f.size, hash: f.hash, createdAt: f.createdAt, data: buf });
+    else files.push({ id: f.id, documentId: f.documentId, name: f.name, mime: safeDocumentMime(f.mime), size: f.size, hash: f.hash, createdAt: f.createdAt, data: buf });
   }
   return errors.length ? { ok: false, errors: errors.slice(0, 10) } : { ok: true, files };
 }
