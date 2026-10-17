@@ -38,6 +38,9 @@ export function navigate(to: string): void {
   if (isModalEntry(history.state)) {
     replacing = true;
     window.location.replace(`${window.location.pathname}${window.location.search}${target}`);
+    // Safari (WebKit) は置き換えた履歴にも元のモーダルの印 (wcModal) を引き継ぐため、印を外す。
+    // 残すと「モーダルの履歴の上にいる」と判断され、閉じる処理の「1つ戻す」で移動が取り消される (Phase 10 で CI の記録から特定)
+    if (isModalEntry(history.state)) history.replaceState({ wcIdx: currentIdx }, '');
     return;
   }
   window.location.hash = target;
@@ -97,6 +100,8 @@ interface ModalEntry {
 const modalStack: ModalEntry[] = [];
 
 function syncHistory() {
+  // 置き換えの移動で、元のモーダルの印が残っていたら外す (WebKit)
+  if (replacing && isModalEntry(history.state)) history.replaceState({ ...(history.state as object), wcModal: undefined }, '');
   const state = history.state as EntryState | null;
   const prevIdx = currentIdx;
   if (typeof state?.wcIdx === 'number') {
@@ -120,6 +125,11 @@ function syncHistory() {
     currentIdx = replacing ? currentIdx : currentIdx + 1;
     stamp({ wcIdx: currentIdx });
     paths = paths.slice(0, currentIdx);
+    paths[currentIdx] = parseHash(window.location.hash).path;
+    savePaths();
+  }
+  if (replacing) {
+    // 置き換えた履歴の画面を記録し直す (WebKit では元の番号のまま届くため、上の分岐で記録されない)
     paths[currentIdx] = parseHash(window.location.hash).path;
     savePaths();
   }
