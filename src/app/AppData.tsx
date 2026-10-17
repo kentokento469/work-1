@@ -16,6 +16,8 @@ import type { DataSnapshot, Department, Employee } from '../domain/types';
 import { deriveNotices, isUnread, readNoticeState, type AppNotice, type NoticeState } from '../domain/notifications';
 import { AppError, WorkCoreService } from '../services/workcoreService';
 import { reportError, storageErrorMessage } from '../services/common';
+import { readBusinessCalendar, setBusinessCalendar } from '../domain/calendar';
+import { buildIndex, type DataIndex } from '../domain/dataIndex';
 import { useToast } from '../ui/Toast';
 
 interface AppDataValue {
@@ -38,6 +40,8 @@ interface AppDataValue {
   today: string;
   deptById: Map<string, Department>;
   empById: Map<string, Employee>;
+  /** ID で引くための索引 (一覧の各行で全件を探さない。Phase 12) */
+  index: DataIndex;
   /**
    * 変更処理を実行し、成功時はデータ再読込とトースト表示。失敗時は AppError を投げ直す。
    * undo を渡すと通知に「元に戻す」ボタンを付ける (確認ダイアログの代わりに取り消し可能にする)
@@ -270,6 +274,8 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<AppDataValue | null>(() => {
     if (state.status !== 'ready') return null;
+    // 営業日の設定 (会社の休業日など) を、期限・営業日の計算より先に反映する (Phase 12)
+    setBusinessCalendar(readBusinessCalendar(state.data.settings));
     const today = state.service.today();
     const stock = computeAllStock(state.data.items, state.data);
     const settings = readAutomationSettings(state.data);
@@ -292,6 +298,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       today,
       deptById: new Map(state.data.departments.map((d) => [d.id, d])),
       empById: new Map(state.data.employees.map((e) => [e.id, e])),
+      index: buildIndex(state.data),
       run,
       reload,
     };

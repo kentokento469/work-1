@@ -9,7 +9,7 @@
  */
 import { generateId, nowISO } from '../domain/id';
 import { addDays, diffDays } from '../domain/date';
-import { nextOccurrence } from '../domain/recurrence';
+import { nextScheduledDue } from '../domain/recurrence';
 import { TASK_STATUS_LABEL, type ChecklistItem, type Project, type Task, type TaskSource, type TaskStatus } from '../domain/types';
 import { validateTask, type TaskInput } from '../domain/validation';
 import type { WorkCoreDB } from '../data/db';
@@ -70,7 +70,8 @@ export class TaskService {
    */
   private async spawnNextOccurrence(tx: WriteTx, task: Task, now: string): Promise<Task | null> {
     if (task.status !== 'done' || !task.recurrence || !task.dueDate || task.nextOccurrenceId) return null;
-    const due = nextOccurrence(task.recurrence, task.dueDate, this.clock(), task.recurrence.anchor ?? task.dueDate);
+    // 次回の期限: 前回の予定日 (または完了日) から計算し、休みの日の扱いに従って調整する (Phase 12)
+    const { due, raw } = nextScheduledDue(task.recurrence, task.dueDate, this.clock(), this.clock());
     const startDate = task.startDate ? addDays(due, diffDays(task.dueDate, task.startDate)) : null;
     const next: Task = {
       ...task,
@@ -78,6 +79,7 @@ export class TaskService {
       status: 'todo',
       dueDate: due,
       startDate,
+      recurrence: { ...task.recurrence, lastRaw: raw },
       checklist: task.checklist?.map((c) => ({ ...c, done: false })),
       seriesId: task.seriesId ?? task.id,
       nextOccurrenceId: null,

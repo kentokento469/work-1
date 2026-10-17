@@ -46,12 +46,6 @@ export function isWeekend(value: ISODate): boolean {
   return day === 0 || day === 6;
 }
 
-/** 土日の場合は直前の平日 (金曜) に前倒しする */
-export function toPreviousBusinessDay(value: ISODate): ISODate {
-  let v = value;
-  while (isWeekend(v)) v = addDays(v, -1);
-  return v;
-}
 
 export function formatDateJa(value: ISODate | null | undefined): string {
   if (!value || !isValidISODate(value)) return '—';

@@ -1,5 +1,5 @@
 import { computeAllStock } from '../domain/inventory/stock';
-import { describeRecurrence } from '../domain/recurrence';
+import { describeRecurrenceFull } from '../domain/recurrence';
 import { compareDue } from '../domain/tasks';
 import { ASSET_STATUS_LABEL, INVENTORY_CATEGORY_LABEL, MOVEMENT_TYPE_LABEL } from '../domain/inventory/types';
 import { DOCUMENT_STATUS_LABEL, DOCUMENT_TYPE_LABEL, EXTRACTION_METHOD_LABEL, FIELD_DEFS, type DocumentRecord, type DocumentType } from '../domain/documents/types';
@@ -71,7 +71,7 @@ export function tasksToCsv(data: Pick<DataSnapshot, 'tasks' | 'employees' | 'dep
         (t.tags ?? []).join(' '),
         (t.parentTaskId && title.get(t.parentTaskId)) ?? '',
         t.checklist?.length ? `${t.checklist.filter((c) => c.done).length}/${t.checklist.length}` : '',
-        t.recurrence ? describeRecurrence(t.recurrence) : '',
+        t.recurrence ? describeRecurrenceFull(t.recurrence) : '',
       ];
     });
   return toCsv(

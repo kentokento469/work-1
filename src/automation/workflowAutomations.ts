@@ -5,7 +5,8 @@
  */
 import { buildOnboardingPlan } from './onboardingEngine';
 import { actionSignature, fingerprint, type AutomationAction, type AutomationDefinition, type AutomationProposal } from './engine';
-import { addDays, diffDays, toPreviousBusinessDay } from '../domain/date';
+import { addDays, diffDays } from '../domain/date';
+import { toPreviousBusinessDayCal } from '../domain/calendar';
 import type { DataSnapshot, ISODate } from '../domain/types';
 
 const JOSHIS = 'dept_joshis';
@@ -75,7 +76,7 @@ const RETIRE_TASKS: { kind: string; title: string; description: string; dept: st
   { kind: 'badge', title: '社員証・鍵の回収', description: '社員証・入館カード・鍵を退職日までに回収する', dept: SOUMU, assignee: '', daysBefore: 1 },
 ];
 const dueBefore = (date: ISODate, today: ISODate, days: number) => {
-  const d = toPreviousBusinessDay(addDays(date, -days));
+  const d = toPreviousBusinessDayCal(addDays(date, -days));
   return d < today ? today : d;
 };
 

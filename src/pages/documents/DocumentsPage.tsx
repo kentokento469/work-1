@@ -6,6 +6,7 @@ import { useMemo, useState } from 'react';
 import { AttentionSection } from '../../ui/notices';
 import { CheckSquare, CircleAlert, FileDown, FilePlus2, FileText, Paperclip, Search, Share2, Square, X } from 'lucide-react';
 import { useAppData } from '../../app/AppData';
+import { ShowMore, usePaged } from '../../ui/ShowMore';
 import { canShareFiles, downloadText, shareTextFiles, timestampForFile } from '../../app/download';
 import { useQueryState } from '../../app/hooks';
 import { documentDate, documentLinesToCsv, documentsToCsv, filterDocumentsForExport } from '../../data/csv';
@@ -56,6 +57,8 @@ export function DocumentsPage() {
       .filter((d) => !kw || kw.split(/\s+/).every((w) => hay.get(d.id)!.includes(w)))
       .sort((a, b) => (a.status === 'needs_review' ? 0 : 1) - (b.status === 'needs_review' ? 0 : 1) || b.createdAt.localeCompare(a.createdAt));
   }, [data.documents, tab, f.type, f.q, hay]);
+  // 一覧は100件ずつ表示する (Phase 12)
+  const pagedDocs = usePaged(list, JSON.stringify([tab, f.q, f.type]));
 
   const toggle = (id: string) => setSelected((s) => {
     const n = new Set(s);
@@ -138,7 +141,7 @@ export function DocumentsPage() {
         </Card>
       ) : (
         <ul className="mt-3 space-y-2" data-testid="document-list">
-          {list.map((d) => {
+          {pagedDocs.visible.map((d) => {
             const unconfirmed = d.status === 'needs_review' ? IMPORTANT_FIELDS.filter((k) => !d.reviewed.includes(k)).length : 0;
             const low = Object.values(d.extracted).filter((x) => x && x.certainty === 'low').length;
             const on = selected.has(d.id);
@@ -178,6 +181,7 @@ export function DocumentsPage() {
           })}
         </ul>
       )}
+      <ShowMore remaining={pagedDocs.remaining} onMore={pagedDocs.more} onAll={pagedDocs.all} testId="document-show-more" />
       {selecting && (
         <div className="sticky bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-20 mt-3 flex items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-lg backdrop-blur lg:bottom-4 dark:border-navy-700 dark:bg-navy-900/95">
           <span className="text-sm">{selected.size}件を選択中</span>

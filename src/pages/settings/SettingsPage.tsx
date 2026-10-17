@@ -12,6 +12,7 @@ import type { InquiryCategory } from '../../domain/types';
 import type { CategoryInput } from '../../services/helpdeskService';
 import { AppError } from '../../services/workcoreService';
 import { DepartmentsCard } from '../../features/RulesPanel';
+import { CalendarSettingsCard } from '../../features/CalendarSettingsCard';
 import { Modal, ModalCancelButton } from '../../ui/Modal';
 import { Badge, Button, Card, CardHeader, IconButton, PageHeader, SelectField, TextAreaField, TextField, cx } from '../../ui/primitives';
 
@@ -26,6 +27,7 @@ export function SettingsPage() {
       <PageHeader title="設定" description="変更内容はこの端末のブラウザに保存されます" />
       <ThemeCard />
       <AiCard />
+      <CalendarSettingsCard />
       <Card className="mt-4 overflow-hidden">
         <CardHeader
           title="問い合わせカテゴリ"

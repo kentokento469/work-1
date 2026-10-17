@@ -6,6 +6,7 @@
  * - 毎年: 2/29 はうるう年以外は 2/28。うるう年には 2/29 に戻る
  * - 次回が今日より前になる場合 (長く完了しなかった等) は、今日以降の最初の回まで進める。過去の未実行分はまとめて作らない
  */
+import { toNextBusinessDay, toPreviousBusinessDayCal } from './calendar';
 import { addDays, diffDays, isValidISODate, parseISODate, toISODate } from './date';
 import type { ISODate, Recurrence } from './types';
 
@@ -78,7 +79,24 @@ export function validateRecurrence(rule: unknown): string | null {
   if (r.weekdays && (!Array.isArray(r.weekdays) || r.weekdays.some((x) => !Number.isInteger(x) || x < 0 || x > 6))) return '曜日の指定が正しくありません';
   if (r.monthDay !== undefined && r.monthDay !== 'last' && (!Number.isInteger(r.monthDay) || r.monthDay < 1 || r.monthDay > 31)) return '日付は1〜31日または月末で指定してください';
   if (r.anchor !== undefined && !isValidISODate(r.anchor)) return '繰り返しの基準日が正しくありません';
+  if (r.adjust !== undefined && !['none', 'before', 'after'].includes(r.adjust)) return '休みの日の扱いが正しくありません';
+  if (r.basis !== undefined && !['due', 'completion'].includes(r.basis)) return '次回の期限の基準が正しくありません';
+  if (r.lastRaw !== undefined && !isValidISODate(r.lastRaw)) return '繰り返しの予定日が正しくありません';
   return null;
+}
+
+/**
+ * 完了したタスクの次回の期限 (Phase 12)。
+ * - basis = 'completion' なら完了した日から周期分あと、それ以外は前回の予定日 (調整前) から
+ * - adjust に従って休みの日を避ける。調整前の予定日 (raw) を次回の計算の起点として返す
+ */
+export function nextScheduledDue(rule: Recurrence, due: ISODate, completedOn: ISODate, today: ISODate): { due: ISODate; raw: ISODate } {
+  let raw: ISODate;
+  if (rule.basis === 'completion') raw = nextAfter({ ...rule, weekdays: undefined, monthDay: undefined }, completedOn, completedOn);
+  else raw = nextOccurrence(rule, rule.lastRaw ?? due, today, rule.anchor ?? rule.lastRaw ?? due);
+  const adjusted = rule.adjust === 'before' ? toPreviousBusinessDayCal(raw) : rule.adjust === 'after' ? toNextBusinessDay(raw) : raw;
+  // 前倒しで今日より前になる場合は今日 (過去の期限のタスクを作らない)
+  return { due: adjusted < today ? today : adjusted, raw };
 }
 
 /** 画面表示用の説明 (例:「毎月 月末」「隔週 月・木曜」) */
@@ -98,4 +116,12 @@ export function describeRecurrence(r: Recurrence): string {
     case 'yearly':
       return n === 1 ? '毎年' : `${n}年ごと`;
   }
+}
+
+/** 基準・休みの日の扱いを含めた説明 (例:「毎月 月末・休みの日は前の営業日」「完了から7日ごと」) */
+export function describeRecurrenceFull(r: Recurrence): string {
+  const unit = { daily: '日', weekly: '週間', monthly: 'か月', yearly: '年' }[r.freq];
+  const base = r.basis === 'completion' ? `完了から${r.interval}${unit}後` : describeRecurrence(r);
+  const adj = r.adjust === 'before' ? '・休みの日は前の営業日' : r.adjust === 'after' ? '・休みの日は次の営業日' : '';
+  return base + adj;
 }

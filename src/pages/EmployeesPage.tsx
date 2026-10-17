@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { ChevronRight, Plus, Search, UserPlus, Users, X } from 'lucide-react';
 import { useAppData } from '../app/AppData';
+import { ShowMore, usePaged } from '../ui/ShowMore';
 import { navigate } from '../app/router';
 import { useQueryState } from '../app/hooks';
 import { formatDateJa } from '../domain/date';
@@ -36,6 +37,8 @@ export function EmployeesPage() {
       })
       .sort((a, b) => a.employeeNumber.localeCompare(b.employeeNumber));
   }, [data.employees, keyword, dept, status, deptById]);
+  // 一覧は100件ずつ表示する (Phase 12)
+  const pagedEmp = usePaged(filtered, [keyword, dept, status].join('|'));
 
   const taskCount = useMemo(() => {
     const m = new Map<string, { open: number; total: number }>();
@@ -112,7 +115,7 @@ export function EmployeesPage() {
           <>
             {/* スマホ: カードリスト */}
             <ul className="divide-y divide-slate-100 md:hidden dark:divide-navy-800">
-              {filtered.map((e) => {
+              {pagedEmp.visible.map((e) => {
                 const c = taskCount.get(e.id);
                 return (
                   <li key={e.id}>
@@ -152,7 +155,7 @@ export function EmployeesPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-navy-800">
-                  {filtered.map((e) => {
+                  {pagedEmp.visible.map((e) => {
                     const c = taskCount.get(e.id);
                     return (
                       <tr
@@ -182,6 +185,7 @@ export function EmployeesPage() {
                 </tbody>
               </table>
             </div>
+            <ShowMore remaining={pagedEmp.remaining} onMore={pagedEmp.more} onAll={pagedEmp.all} testId="employee-show-more" />
           </>
         )}
       </Card>

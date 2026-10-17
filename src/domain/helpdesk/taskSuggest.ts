@@ -5,7 +5,8 @@
  * 登録は担当者の承認後 (プレビューで選択 → 登録) で、ここでは候補を作るだけ。
  * 入社準備ルールと同様に「ルールID」を重複防止キーとして Task.ruleId に保存する。
  */
-import { addDays, toPreviousBusinessDay } from '../date';
+import { addDays } from '../date';
+import { toPreviousBusinessDayCal as toPreviousBusinessDay } from '../calendar';
 import { normalizeText } from '../text';
 import type { ISODate, Inquiry, InquiryCategory, Priority, Task } from '../types';
 import { normalizeTitle } from '../../automation/onboardingEngine';

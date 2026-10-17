@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Building2, CalendarClock, CornerDownRight, FolderKanban, Headset, Laptop, ListChecks, Lock, Repeat, Tag, User } from 'lucide-react';
 import { useAppData } from '../app/AppData';
 import { isTaskOverdue } from '../domain/analytics';
-import { describeRecurrence } from '../domain/recurrence';
+import { describeRecurrenceFull } from '../domain/recurrence';
 import { TASK_STATUSES, TASK_STATUS_LABEL, type Task, type TaskStatus } from '../domain/types';
 import { formatDateJa } from '../domain/date';
 import { linkHref, linkLabel } from '../domain/taskLinks';
@@ -22,7 +22,7 @@ const STATUS_STYLE: Record<TaskStatus, string> = {
  * 繰り返しタスクを完了すると次回が作られることを通知で知らせる
  */
 export function useTaskStatusChange() {
-  const { run, data } = useAppData();
+  const { run, index } = useAppData();
   const [confirm, setConfirm] = useState<{ task: Task; open: Task[] } | null>(null);
   const apply = (task: Task, next: TaskStatus, completeSubtasks = false) =>
     run(
@@ -31,7 +31,7 @@ export function useTaskStatusChange() {
       { undo: (r) => (s) => s.setTaskStatus(task.id, r.previousStatus) },
     ).catch(() => undefined);
   const change = (task: Task, next: TaskStatus) => {
-    const open = next === 'done' ? data.tasks.filter((t) => t.parentTaskId === task.id && t.status !== 'done') : [];
+    const open = next === 'done' ? (index.subtasksByParent.get(task.id) ?? []).filter((t) => t.status !== 'done') : [];
     if (open.length) setConfirm({ task, open });
     else void apply(task, next);
   };
@@ -91,14 +91,15 @@ export function StatusSelect({ task }: { task: Task }) {
 const chip = 'inline-flex items-center gap-1 rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-600 dark:bg-navy-800 dark:text-slate-300';
 
 export function TaskItem({ task, onOpen, showEmployee = true, note }: { task: Task; onOpen: (t: Task) => void; showEmployee?: boolean; note?: string }) {
-  const { today, empById, deptById, data } = useAppData();
+  const { today, empById, deptById, data, index } = useAppData();
   const emp = task.employeeId ? empById.get(task.employeeId) : undefined;
-  const inquiry = task.inquiryId ? data.inquiries.find((i) => i.id === task.inquiryId) : undefined;
-  const asset = task.assetId ? data.assets.find((a) => a.id === task.assetId) : undefined;
-  const project = task.projectId ? data.projects.find((p) => p.id === task.projectId) : undefined;
-  const parent = task.parentTaskId ? data.tasks.find((t) => t.id === task.parentTaskId) : undefined;
-  const subs = data.tasks.filter((t) => t.parentTaskId === task.id);
-  const blockers = (task.dependsOn ?? []).map((id) => data.tasks.find((t) => t.id === id)).filter((t): t is Task => !!t && t.status !== 'done');
+  // 関連データは索引から引く (行ごとに全件を探さない。Phase 12)
+  const inquiry = task.inquiryId ? index.inquiryById.get(task.inquiryId) : undefined;
+  const asset = task.assetId ? index.assetById.get(task.assetId) : undefined;
+  const project = task.projectId ? index.projectById.get(task.projectId) : undefined;
+  const parent = task.parentTaskId ? index.taskById.get(task.parentTaskId) : undefined;
+  const subs = index.subtasksByParent.get(task.id) ?? [];
+  const blockers = (task.dependsOn ?? []).map((id) => index.taskById.get(id)).filter((t): t is Task => !!t && t.status !== 'done');
   const checklist = task.checklist ?? [];
   const overdue = isTaskOverdue(task, today);
   return (
@@ -145,7 +146,7 @@ export function TaskItem({ task, onOpen, showEmployee = true, note }: { task: Ta
                 {task.recurrence && (
                   <span className={chip} data-testid="task-recurrence">
                     <Repeat className="size-3" aria-hidden />
-                    {describeRecurrence(task.recurrence)}
+                    {describeRecurrenceFull(task.recurrence)}
                   </span>
                 )}
                 {checklist.length > 0 && (

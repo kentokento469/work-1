@@ -18,6 +18,7 @@ import { createDemoData, createHelpdeskDemoData } from '../demo/demoData';
 import { createDefaultInquiryCategories } from '../domain/helpdesk/defaults';
 import { AppError, abortWith, conflictError, fieldError, guardTx, logActivity, storageErrorMessage, type UpdateOptions, type WriteTx } from './common';
 import { SafetyStore } from '../data/safety';
+import { CALENDAR_SETTING_ID, readBusinessCalendar, setBusinessCalendar, type BusinessCalendar } from '../domain/calendar';
 import { createBackup, validateBackup } from '../data/backup';
 import { repairOptionalReferences } from '../data/repair';
 import { HelpdeskService } from './helpdeskService';
@@ -593,6 +594,19 @@ export class WorkCoreService {
     await tx.objectStore('settings').put({ id: AUTOMATION_SETTING_ID, value, updatedAt: nowISO() });
     await logActivity(tx, 'automation', 'setting', `自動化「${def.name}」を${setting.enabled ? (setting.mode === 'auto' ? '自動実行' : '確認してから実行') : '無効'}にしました`);
     await tx.done;
+  }
+
+  /** 営業日の設定 (休みの曜日・祝日・会社の休業日) を保存する (Phase 12)。期限の自動計算・営業日の判定に使う */
+  async saveBusinessCalendar(cal: BusinessCalendar): Promise<BusinessCalendar> {
+    const clean = readBusinessCalendar([{ id: CALENDAR_SETTING_ID, value: cal }]);
+    if (clean.weekendDays.length >= 7) throw new AppError('すべての曜日を休みにはできません');
+    const tx = this.db.transaction(['settings', 'activities'], 'readwrite');
+    await guardTx(tx, async () => {
+      await tx.objectStore('settings').put({ id: CALENDAR_SETTING_ID, value: clean, updatedAt: nowISO() });
+      await logActivity(tx, 'data', 'calendar', `営業日の設定を変更しました（会社の休業日 ${clean.companyHolidays.length}日・祝日を${clean.observeHolidays ? '休み' : '営業日'}にする）`);
+    });
+    setBusinessCalendar(clean);
+    return clean;
   }
 
   /**

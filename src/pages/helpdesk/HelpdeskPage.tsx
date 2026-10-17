@@ -6,6 +6,7 @@ import { useMemo } from 'react';
 import { AttentionSection } from '../../ui/notices';
 import { BarChart3, ChevronRight, Headset, List, Plus, Search, X } from 'lucide-react';
 import { useAppData } from '../../app/AppData';
+import { ShowMore, usePaged } from '../../ui/ShowMore';
 import { useQueryState } from '../../app/hooks';
 import { navigate } from '../../app/router';
 import { isInquiryOverdue } from '../../domain/helpdesk/inquiry';
@@ -64,6 +65,8 @@ export function HelpdeskPage() {
         return ob - oa || PRIORITY_WEIGHT[b.priority] - PRIORITY_WEIGHT[a.priority] || a.dueDate.localeCompare(b.dueDate);
       });
   }, [data.inquiries, f, today]);
+  // 一覧は100件ずつ表示する (Phase 12)
+  const pagedInq = usePaged(list, JSON.stringify(f));
 
   const assignees = useMemo(() => [...new Set(data.inquiries.map((i) => i.assignee || '（未割当）'))].sort(), [data.inquiries]);
   const hasFilter = f.q || f.category || f.priority || f.assignee;
@@ -188,7 +191,7 @@ export function HelpdeskPage() {
               />
             ) : (
               <ul className="divide-y divide-slate-100 dark:divide-navy-800" data-testid="inquiry-list">
-                {list.map((i) => {
+                {pagedInq.visible.map((i) => {
                   const overdue = isInquiryOverdue(i, today);
                   const ts = taskStat.get(i.id);
                   return (
@@ -225,6 +228,7 @@ export function HelpdeskPage() {
                 })}
               </ul>
             )}
+            <ShowMore remaining={pagedInq.remaining} onMore={pagedInq.more} onAll={pagedInq.all} testId="inquiry-show-more" />
           </Card>
         </>
       )}

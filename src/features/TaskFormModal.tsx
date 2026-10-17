@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Copy, ListChecks, Plus, Save, Trash2, X } from 'lucide-react';
 import { useAppData } from '../app/AppData';
-import { describeRecurrence } from '../domain/recurrence';
+import { describeRecurrenceFull } from '../domain/recurrence';
 import { PRIORITIES, PRIORITY_LABEL, TASK_STATUSES, TASK_STATUS_LABEL, type ChecklistItem, type Priority, type Recurrence, type Task, type TaskStatus } from '../domain/types';
 import { validateTask, type FieldErrors, type TaskInput } from '../domain/validation';
 import { generateId } from '../domain/id';
@@ -448,7 +448,7 @@ export function TaskFormModal({
                     { value: 'custom', label: 'カスタム（間隔を指定）' },
                   ]}
                   error={errors.recurrence}
-                  hint={form.recurrence ? `${describeRecurrence(form.recurrence)}：完了すると次回を自動で作成します（期限が必要）` : undefined}
+                  hint={form.recurrence ? `${describeRecurrenceFull(form.recurrence)}：完了すると次回を自動で作成します（期限が必要）` : undefined}
                   data-testid="recurrence-select"
                 />
                 {form.recurrence && (recurPreset === 'custom' || form.recurrence.freq === 'weekly') && (
@@ -477,6 +477,33 @@ export function TaskFormModal({
                     {recurPreset === 'custom' && form.recurrence.freq === 'monthly' && (
                       <SelectField label="日付" value={String(form.recurrence.monthDay ?? '')} onChange={(e) => set('recurrence', { ...form.recurrence!, monthDay: e.target.value === 'last' ? 'last' : e.target.value ? Number(e.target.value) : undefined })} options={[{ value: '', label: '期限と同じ日' }, { value: 'last', label: '月末' }, ...Array.from({ length: 31 }, (_, i) => ({ value: String(i + 1), label: `${i + 1}日` }))]} />
                     )}
+                  </div>
+                )}
+                {/* 次回の期限の基準と、休みの日の扱い (Phase 12) */}
+                {form.recurrence && (
+                  <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <SelectField
+                      label="次回の期限の基準"
+                      value={form.recurrence.basis ?? 'due'}
+                      onChange={(e) => set('recurrence', { ...form.recurrence!, basis: e.target.value === 'completion' ? 'completion' : undefined, lastRaw: undefined })}
+                      options={[
+                        { value: 'due', label: '前回の期限から（予定どおり）' },
+                        { value: 'completion', label: '完了した日から（例：完了から1か月後）' },
+                      ]}
+                      data-testid="recurrence-basis"
+                    />
+                    <SelectField
+                      label="次回の期限が休みの日のとき"
+                      value={form.recurrence.adjust ?? 'none'}
+                      onChange={(e) => set('recurrence', { ...form.recurrence!, adjust: e.target.value === 'none' ? undefined : (e.target.value as 'before' | 'after') })}
+                      options={[
+                        { value: 'none', label: 'そのまま' },
+                        { value: 'before', label: '前の営業日にする' },
+                        { value: 'after', label: '次の営業日にする' },
+                      ]}
+                      hint="休みの日：土日・祝日・会社の休業日（設定で変更）"
+                      data-testid="recurrence-adjust"
+                    />
                   </div>
                 )}
               </div>

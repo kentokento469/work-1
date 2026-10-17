@@ -2,7 +2,8 @@
  * Phase 3 の部門横断の自動化定義 (人事・ヘルプデスク・在庫・資産の連携)。
  * すべて副作用のない検出処理で、実行はサービス層 (InventoryService.applyProposal) が行う。
  */
-import { addDays, diffDays, toPreviousBusinessDay } from '../domain/date';
+import { addDays, diffDays } from '../domain/date';
+import { toPreviousBusinessDayCal } from '../domain/calendar';
 import { normalizeText } from '../domain/text';
 import type { DataSnapshot, Employee, ISODate } from '../domain/types';
 import type { Asset, InventoryCategory, Item } from '../domain/inventory/types';
@@ -17,7 +18,7 @@ function dept(data: DataSnapshot, preferred: string): string {
 
 /** 期限: 基準日の前営業日。過去になる場合は今日 */
 function dueBefore(date: ISODate, today: ISODate, daysBefore = 1): ISODate {
-  const d = toPreviousBusinessDay(addDays(date, -daysBefore));
+  const d = toPreviousBusinessDayCal(addDays(date, -daysBefore));
   return d < today ? today : d;
 }
 
@@ -347,7 +348,7 @@ export const failureReplacement: AutomationDefinition = {
           departmentId: dept(data, JOSHIS),
           assignee: inq.assignee || '小林 美咲',
           priority: inq.priority,
-          dueDate: toPreviousBusinessDay(addDays(today, 2)) < today ? today : toPreviousBusinessDay(addDays(today, 2)),
+          dueDate: toPreviousBusinessDayCal(addDays(today, 2)) < today ? today : toPreviousBusinessDayCal(addDays(today, 2)),
           employeeId: null,
           inquiryId: inq.id,
           assetId: broken.id,

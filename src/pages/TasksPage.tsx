@@ -4,11 +4,12 @@
  * 詳細な絞り込み (プロジェクト・タグ・担当・優先度・生成元) は必要な時だけ開く。
  * リスト・ボード・カレンダー・プロジェクトは同じデータを表示し、どこで更新しても即座に反映される。
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CalendarDays, ClipboardList, Columns3, FolderKanban, List, Search, X } from 'lucide-react';
 import { useQueryState } from '../app/hooks';
 import { useAppData } from '../app/AppData';
 import { useFocusHighlight } from '../app/focus';
+import { ShowMore, usePaged } from '../ui/ShowMore';
 import { isTaskOverdue } from '../domain/analytics';
 import { addDays, parseISODate } from '../domain/date';
 import { compareDue } from '../domain/tasks';
@@ -71,7 +72,7 @@ function inScope(t: Task, scope: Scope, today: string, weekEnd: string): boolean
 }
 
 export function TasksPage({ query }: { query: URLSearchParams }) {
-  const { data, today, empById } = useAppData();
+  const { data, today, empById, index } = useAppData();
   // 表示条件は URL に保存し、他画面から戻っても保持する
   const [f, setF] = useQueryState({ view: 'list', status: 'open', q: '', priority: '', dept: '', employee: '', source: '', project: '', tag: '', progress: '', sort: 'due', group: '', month: '', day: '' });
   const legacy = LEGACY_STATUS.includes(f.status as TaskStatus) ? (f.status as TaskStatus) : null;
@@ -109,6 +110,15 @@ export function TasksPage({ query }: { query: URLSearchParams }) {
   };
 
   const base = useMemo(() => data.tasks.filter(matchesExtra), [data.tasks, progress, priority, dept, employee, source, project, tag, keyword, empById]);
+  const totals = useMemo(() => {
+    let open = 0;
+    let overdue = 0;
+    for (const t of data.tasks) {
+      if (t.status !== 'done') open++;
+      if (isTaskOverdue(t, today)) overdue++;
+    }
+    return { open, overdue };
+  }, [data.tasks, today]);
   const counts = useMemo(() => Object.fromEntries(SCOPES.map((s) => [s.key, base.filter((t) => inScope(t, s.key, today, weekEnd)).length])) as Record<Scope, number>, [base, today, weekEnd]);
 
   const filtered = useMemo(() => {
@@ -133,6 +143,9 @@ export function TasksPage({ query }: { query: URLSearchParams }) {
     // focusId が変わった時だけ調整する
   }, [focusId]);
   useFocusHighlight(focusTask ? focusId : null, focusVisible);
+  // 一覧は100件ずつ表示する (数千件でも表示・入力が遅くならないように。通知から移動した対象は必ず表示。Phase 12)
+  const mustIncludeFocus = useCallback((t: Task) => t.id === focusId, [focusId]);
+  const paged = usePaged(filtered, [view, scope, keyword, sort, progress, priority, dept, employee, source, project, tag, f.group].join('|'), { mustInclude: focusId ? mustIncludeFocus : undefined });
 
   const filteredEmployee = employee ? empById.get(employee) : undefined;
   const currentProject = project && project !== 'none' ? data.projects.find((p) => p.id === project) : undefined;
@@ -157,7 +170,7 @@ export function TasksPage({ query }: { query: URLSearchParams }) {
     <>
       <PageHeader
         title="タスク管理"
-        description={`未完了 ${data.tasks.filter((t) => t.status !== 'done').length}件・期限超過 ${data.tasks.filter((t) => isTaskOverdue(t, today)).length}件`}
+        description={`未完了 ${totals.open}件・期限超過 ${totals.overdue}件`}
       />
 
       <QuickAdd defaults={createDefaults} onDetail={() => setCreating(true)} />
@@ -244,7 +257,7 @@ export function TasksPage({ query }: { query: URLSearchParams }) {
             <FilterSelect label="進捗" value={f.progress || legacy || ''} onChange={(v) => setF({ progress: v, ...(legacy ? { status: 'all' } : {}) })} options={[{ value: '', label: '全進捗' }, ...TASK_STATUSES.map((s) => ({ value: s, label: TASK_STATUS_LABEL[s] }))]} />
             <FilterSelect label="優先度" value={priority} onChange={(v) => setF({ priority: v })} options={[{ value: '', label: '全優先度' }, ...PRIORITIES.map((p) => ({ value: p, label: `優先度 ${PRIORITY_LABEL[p]}` }))]} />
             <FilterSelect label="担当部署" value={dept} onChange={(v) => setF({ dept: v })} options={[{ value: '', label: '全担当部署' }, ...data.departments.map((d) => ({ value: d.id, label: d.name }))]} />
-            <FilterSelect label="対象社員" value={employee} onChange={(v) => setF({ employee: v })} options={[{ value: '', label: '全対象社員' }, ...data.employees.filter((e) => data.tasks.some((t) => t.employeeId === e.id)).map((e) => ({ value: e.id, label: e.name }))]} />
+            <FilterSelect label="対象社員" value={employee} onChange={(v) => setF({ employee: v })} options={[{ value: '', label: '全対象社員' }, ...data.employees.filter((e) => index.employeesWithTasks.has(e.id)).map((e) => ({ value: e.id, label: e.name }))]} />
             <FilterSelect
               label="生成元"
               value={source}
@@ -319,8 +332,8 @@ export function TasksPage({ query }: { query: URLSearchParams }) {
               />
             ) : grouped ? (
               <div data-testid="task-groups">
-                {[...data.projects.filter((p) => filtered.some((t) => t.projectId === p.id)), null].map((p) => {
-                  const list = filtered.filter((t) => (p ? t.projectId === p.id : !t.projectId || !data.projects.some((x) => x.id === t.projectId)));
+                {[...data.projects.filter((p) => paged.visible.some((t) => t.projectId === p.id)), null].map((p) => {
+                  const list = paged.visible.filter((t) => (p ? t.projectId === p.id : !t.projectId || !index.projectById.has(t.projectId)));
                   if (!list.length) return null;
                   return (
                     <section key={p?.id ?? 'none'} aria-label={p?.name ?? 'プロジェクトなし'}>
@@ -334,8 +347,9 @@ export function TasksPage({ query }: { query: URLSearchParams }) {
                 })}
               </div>
             ) : (
-              renderList(filtered)
+              renderList(paged.visible)
             )}
+            <ShowMore remaining={paged.remaining} onMore={paged.more} onAll={paged.all} testId="task-show-more" />
           </Card>
         </>
       )}

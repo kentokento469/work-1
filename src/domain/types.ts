@@ -158,6 +158,13 @@ export interface Recurrence {
   monthDay?: number | 'last';
   /** 繰り返しを設定した時の期限 (月末・うるう年で寄せた日付が次回以降に影響しないよう、元の日を覚えておく) */
   anchor?: ISODate;
+  // ---- Phase 12 ----
+  /** 次回の期限が休みの日 (土日・祝日・会社の休業日) に当たったとき: 前の営業日 / 次の営業日 / そのまま (既定) */
+  adjust?: 'none' | 'before' | 'after';
+  /** 次回の期限の基準: 前回の期限 (既定) / 完了した日 (例: 完了から7日後) */
+  basis?: 'due' | 'completion';
+  /** 営業日に調整する前の予定日。次回の計算の起点にする (調整で曜日がずれていかないように) */
+  lastRaw?: ISODate;
 }
 
 export type TaskLinkKind = 'item' | 'purchaseOrder' | 'document' | 'asset' | 'inquiry' | 'employee';

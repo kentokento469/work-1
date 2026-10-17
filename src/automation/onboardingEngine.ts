@@ -7,7 +7,8 @@
  * 入出力がプレーンなデータのみなので、将来の承認フロー (計画を承認待ちとして保存) や
  * 外部API連携 (計画を外部システムへ送信) にもそのまま再利用できる。
  */
-import { addDays, diffDays, isValidISODate, toPreviousBusinessDay } from '../domain/date';
+import { addDays, diffDays, isValidISODate } from '../domain/date';
+import { toPreviousBusinessDayCal } from '../domain/calendar';
 import { generateId } from '../domain/id';
 import type { Department, Employee, ISODate, OnboardingRule, Priority, Task } from '../domain/types';
 
@@ -67,7 +68,7 @@ export function ruleApplicability(rule: OnboardingRule, employee: Employee): str
 export function calculateDueDate(hireDate: ISODate, offsetDays: number, todayISO: ISODate): { dueDate: ISODate; notes: string[] } {
   const notes: string[] = [];
   const raw = addDays(hireDate, offsetDays);
-  let due = toPreviousBusinessDay(raw);
+  let due = toPreviousBusinessDayCal(raw);
   if (due !== raw) notes.push('休日のため直前の平日に前倒し');
   if (due < todayISO) {
     due = todayISO;

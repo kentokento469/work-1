@@ -4,20 +4,15 @@
  * - 入力検証 (秘密情報の混入チェックを含む)
  * - 採番・期限計算
  */
-import { addDays, isValidISODate, isWeekend } from '../date';
+import { isValidISODate } from '../date';
+import { addBusinessDays as addBusinessDaysCal, toNextBusinessDay } from '../calendar';
 import { PRIORITIES, type ISODate, type Inquiry, type InquiryStatus, type Priority, type Task } from '../types';
 import type { FieldErrors, ValidationResult } from '../validation';
 import { detectSecrets } from './secrets';
 
+/** 受付日 (休みの日なら次の営業日) から n 営業日後。土日・祝日・会社の休業日を除く (Phase 12) */
 export function addBusinessDays(from: ISODate, days: number): ISODate {
-  let d = from;
-  while (isWeekend(d)) d = addDays(d, 1);
-  let left = days;
-  while (left > 0) {
-    d = addDays(d, 1);
-    if (!isWeekend(d)) left--;
-  }
-  return d;
+  return addBusinessDaysCal(toNextBusinessDay(from), days);
 }
 
 /** 問い合わせ番号: HD-<年>-<4桁連番> */

@@ -3,7 +3,8 @@ import { computeDashboard, computeDepartmentBreakdown, staffSegment } from './an
 import { emptyInventory } from './inventory/defaults';
 import { createDemoData } from '../demo/demoData';
 import { suggestEmployeeStatus, normalizeEmployeeNumber } from './validation';
-import { toPreviousBusinessDay, isValidISODate } from './date';
+import { isValidISODate } from './date';
+import { toPreviousBusinessDayCal as toPreviousBusinessDay } from './calendar';
 
 const TODAY = '2026-10-15';
 

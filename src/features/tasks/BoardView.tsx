@@ -11,18 +11,22 @@ import { StatusSelect, useTaskStatusChange } from '../TaskItem';
 
 const COLUMNS: TaskStatus[] = ['todo', 'in_progress', 'on_hold', 'done'];
 const DONE_LIMIT = 20;
+/** 未完了の列も多すぎると描画が遅くなるため、50件ずつ表示する (Phase 12) */
+const COL_PAGE = 50;
 
 export function BoardView({ tasks, onOpen }: { tasks: Task[]; onOpen: (t: Task) => void }) {
-  const { today, data } = useAppData();
+  const { today, index } = useAppData();
   const { change, dialog } = useTaskStatusChange();
   const [over, setOver] = useState<TaskStatus | null>(null);
-  const project = (t: Task) => (t.projectId ? data.projects.find((p) => p.id === t.projectId)?.name : undefined);
+  const [limits, setLimits] = useState<Partial<Record<TaskStatus, number>>>({});
+  const project = (t: Task) => (t.projectId ? index.projectById.get(t.projectId)?.name : undefined);
   return (
     <div className="-mx-4 overflow-x-auto px-4 pb-2 sm:mx-0 sm:px-0" data-no-swipe data-testid="board">
       <div className="grid min-w-[880px] grid-cols-4 gap-3">
         {COLUMNS.map((st) => {
           const all = tasks.filter((t) => t.status === st);
-          const list = st === 'done' ? [...all].sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? '')).slice(0, DONE_LIMIT) : all;
+          const limit = limits[st] ?? COL_PAGE;
+          const list = st === 'done' ? [...all].sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? '')).slice(0, DONE_LIMIT) : all.slice(0, limit);
           return (
             <section
               key={st}
@@ -72,6 +76,11 @@ export function BoardView({ tasks, onOpen }: { tasks: Task[]; onOpen: (t: Task) 
                   </li>
                 ))}
               </ul>
+              {st !== 'done' && all.length > limit && (
+                <button type="button" className="mt-2 min-h-11 rounded-lg bg-white text-xs font-semibold text-navy-700 dark:bg-navy-950 dark:text-navy-200" onClick={() => setLimits((l) => ({ ...l, [st]: limit + COL_PAGE }))} data-testid={`board-more-${st}`}>
+                  さらに表示（残り{all.length - limit}件）
+                </button>
+              )}
               {st === 'done' && all.length > DONE_LIMIT && <p className="px-1.5 pt-2 text-[11px] text-slate-500">完了は新しい{DONE_LIMIT}件のみ表示（リスト表示の「完了」ですべて確認できます）</p>}
             </section>
           );
