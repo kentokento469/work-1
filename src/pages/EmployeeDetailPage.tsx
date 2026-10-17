@@ -123,7 +123,7 @@ export function EmployeeDetailPage({ employeeId }: { employeeId: string }) {
             </Button>
           }
         />
-        {tasks.length > 0 && <ProgressBar value={pct} className="mx-4 mt-3 w-auto sm:mx-5" />}
+        {tasks.length > 0 && <ProgressBar value={pct} className="mx-4 mt-3 w-auto sm:mx-5" label="タスクの完了率" />}
         <div className="mt-2">
           {tasks.length === 0 ? (
             <EmptyState

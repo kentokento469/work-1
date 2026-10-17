@@ -147,7 +147,7 @@ export function InquiryFormFields({
               </optgroup>
             ))}
         </select>
-        <p className={`mt-1 text-xs ${errors.requesterId ? 'text-red-600' : 'text-slate-500 dark:text-slate-400'}`}>
+        <p className={`mt-1 text-xs ${errors.requesterId ? 'text-red-600 dark:text-red-400' : 'text-slate-500 dark:text-slate-400'}`}>
           {errors.requesterId ?? (requester ? `所属：${deptById.get(requester.departmentId)?.name ?? '不明'}${requester.position ? `・${requester.position}` : ''}（社員情報から自動入力）` : '社員管理に登録された社員から選びます')}
         </p>
       </div>

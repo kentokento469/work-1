@@ -121,7 +121,7 @@ export function HelpdeskPage() {
                 className={cx(
                   'inline-flex min-h-10 items-center gap-1.5 rounded-full border px-3.5 text-[13px] font-semibold transition-colors',
                   f.status === t.key
-                    ? 'border-navy-800 bg-navy-800 text-white dark:border-navy-400 dark:bg-navy-500'
+                    ? 'border-navy-800 bg-navy-800 text-white dark:border-navy-400 dark:bg-navy-600'
                     : 'border-slate-200 bg-white text-slate-600 dark:border-navy-700 dark:bg-navy-900 dark:text-slate-300',
                   t.key === 'overdue' && counts.overdue! > 0 && f.status !== t.key && 'border-red-200 text-red-600 dark:border-red-900 dark:text-red-400',
                 )}

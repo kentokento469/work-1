@@ -119,6 +119,19 @@ export function Layout({ active, children }: { active: string; children: ReactNo
 
   return (
     <div className="min-h-dvh">
+      {/* キーボード操作で、毎画面のナビを飛ばして本文へ移動する (WCAG 2.4.1) */}
+      <a
+        href="#main"
+        onClick={(e) => {
+          // ハッシュで画面を切り替えているため、リンクの移動ではなく本文にフォーカスを移す
+          e.preventDefault();
+          document.getElementById('main')?.focus();
+        }}
+        className="sr-only z-[100] rounded-lg bg-navy-800 px-4 py-3 text-sm font-semibold text-white focus:not-sr-only focus:fixed focus:left-3 focus:top-3"
+        data-testid="skip-link"
+      >
+        本文へスキップ
+      </a>
       {/* PC: サイドバー */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r border-slate-200 bg-white lg:flex dark:border-navy-800 dark:bg-navy-900">
         <div className="px-5 py-5">
@@ -178,9 +191,10 @@ export function Layout({ active, children }: { active: string; children: ReactNo
             <a
               href="#/notifications"
               className="relative inline-flex size-11 items-center justify-center rounded-lg text-slate-600 dark:text-slate-300"
-              aria-label={`通知センター（未処理 ${notices.filter((x) => x.actionable).length}件・未読 ${unreadCount}件）`}
               data-testid="header-bell"
             >
+              {/* 名前は読み上げ用の文字で付ける (見た目の未読数の数字と名前が食い違わないように) */}
+              <span className="sr-only">{`通知センター（未処理 ${notices.filter((x) => x.actionable).length}件・未読 ${unreadCount}件）`}</span>
               <Bell className="size-5" aria-hidden />
               {unreadCount > 0 && (
                 <span className="absolute right-1 top-1.5 min-w-4 rounded-full bg-navy-700 px-1 text-center text-[10px] font-bold leading-4 text-white dark:bg-navy-300 dark:text-navy-950" aria-hidden>
@@ -193,7 +207,7 @@ export function Layout({ active, children }: { active: string; children: ReactNo
         </div>
       </header>
 
-      <main className="lg:pl-60">
+      <main id="main" tabIndex={-1} className="outline-none lg:pl-60">
         <div className="mx-auto max-w-6xl px-4 pb-28 pt-5 sm:px-6 lg:px-8 lg:pb-12 lg:pt-8" data-swipe-surface>
           <p className="mb-1 hidden text-xs text-slate-400 lg:block">{formatDateJa(today)}</p>
           {children}

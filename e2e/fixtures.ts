@@ -11,9 +11,20 @@ export const FIXED_NOW = new Date('2026-10-15T09:00:00+09:00');
 export const testNow = () => new Date(FIXED_NOW.getTime());
 
 export const test = base.extend({
-  page: async ({ page }, use) => {
+  page: async ({ page }, use, testInfo) => {
     await page.clock.install({ time: FIXED_NOW });
+    // 失敗の原因調査用 (Phase 10): 画面の URL の移り変わりとエラーを記録し、失敗したときだけ出力する
+    const trail: string[] = [];
+    page.on('framenavigated', (f) => f === page.mainFrame() && trail.push(`nav ${f.url().replace(/^https?:\/\/[^/]+/, '')}`));
+    page.on('console', (m) => (m.type() === 'error' || m.type() === 'warning') && trail.push(`${m.type()} ${m.text().slice(0, 200)}`));
+    page.on('pageerror', (e) => trail.push(`pageerror ${e.message.slice(0, 200)}`));
     await use(page);
+    if (testInfo.status !== testInfo.expectedStatus) {
+      const where = await page
+        .evaluate(() => `${location.hash} history.length=${history.length} state=${JSON.stringify(history.state)}`)
+        .catch(() => '(取得できず)');
+      console.log(`[診断] ${testInfo.title}\n  最後の画面: ${where}\n  ${trail.slice(-25).join('\n  ')}`);
+    }
   },
 });
 export { expect };

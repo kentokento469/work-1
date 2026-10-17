@@ -198,11 +198,12 @@ test('[Dashboard] 部署別社員数：在籍状況の積み上げバー・凡�
   const legend = card.getByTestId('segment-legend');
   for (const l of ['在籍中', '入社予定', '退職予定', '休職中', '退職済']) await expect(legend).toContainText(l);
   // デモ: 営業部は 在籍中3・退職予定1・休職中1・入社予定1・退職済1、在籍人数は 3+1+1=5
-  const sales = card.getByRole('button', { name: /^営業部：/ });
+  // Phase 10: 名前は表示中の文字＋読み上げ用の内訳から作る (見た目の文字と名前を一致させる。WCAG 2.5.3)
+  const sales = card.locator('button[data-row]').filter({ hasText: '営業部' });
   await expect(sales).toContainText('在籍5名');
   await expect(sales).toContainText('退職予定1');
   await expect(sales).toContainText('退職済1');
-  await expect(sales).toHaveAttribute('aria-label', /営業部：在籍5名（在籍中3・退職予定1・休職中1・入社予定1・退職済1）/);
+  await expect(sales).toHaveAccessibleName(/営業部\s*在籍\s*5\s*名\s*（在籍中3・退職予定1・休職中1・入社予定1・退職済1）/);
   // 人数が少ない区分も見える幅で描画される (最小幅)
   const widths = await sales.locator('span.h-full > span').evaluateAll((els) => els.map((e) => e.getBoundingClientRect().width));
   expect(widths).toHaveLength(5);

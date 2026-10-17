@@ -341,7 +341,7 @@ export function TaskFormModal({
                 追加
               </Button>
             </div>
-            {errors.checklist && <p className="mt-1 text-xs text-red-600">{errors.checklist}</p>}
+            {errors.checklist && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors.checklist}</p>}
           </div>
 
           {/* サブタスク (担当・期限を持つ独立したタスク。既存のタスクにだけ追加できる) */}

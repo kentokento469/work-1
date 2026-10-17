@@ -277,7 +277,7 @@ export function DashboardPage() {
                           )}
                         </div>
                         <div className="mt-1.5 flex items-center gap-2">
-                          <ProgressBar value={pct} />
+                          <ProgressBar value={pct} label="入社準備の進捗" />
                           <span className={cx('shrink-0 text-[11px] tabular-nums', h.daysUntil <= 7 ? 'font-semibold text-amber-700 dark:text-amber-400' : 'text-slate-400')}>
                             {h.daysUntil >= 0 ? `あと${h.daysUntil}日` : '入社済'}
                           </span>

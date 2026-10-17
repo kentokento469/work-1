@@ -80,7 +80,7 @@ export function ProjectsView({ onOpenProject }: { onOpenProject: (id: string) =>
                     </p>
                     {p.description && <p className="mt-0.5 line-clamp-2 text-xs text-slate-500">{p.description}</p>}
                     <div className="mt-2 flex items-center gap-2">
-                      <ProgressBar value={pr.rate} className="flex-1" />
+                      <ProgressBar value={pr.rate} className="flex-1" label="プロジェクトの完了率" />
                       <span className="text-xs font-semibold tabular-nums" data-testid="project-progress">
                         {pr.rate}%（{pr.done}/{pr.total}）
                       </span>

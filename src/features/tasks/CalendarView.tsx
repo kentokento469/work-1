@@ -56,7 +56,8 @@ export function CalendarView({ tasks, month, day, onMonth, onDay, onOpen }: { ta
             </div>
           ))}
         </div>
-        <div className="grid grid-cols-7" role="grid" aria-label={`${y}年${m}月のタスク`}>
+        {/* 日付のボタンの並び (キーボードでは Tab で順に移動)。表のような矢印キーの操作はしないため grid の役割は付けない */}
+        <div className="grid grid-cols-7" role="group" aria-label={`${y}年${m}月のタスク`}>
           {weeks.map((d) => {
             const list = byDue.get(d) ?? [];
             const open = list.filter((t) => t.status !== 'done');
@@ -66,9 +67,7 @@ export function CalendarView({ tasks, month, day, onMonth, onDay, onOpen }: { ta
               <button
                 key={d}
                 type="button"
-                role="gridcell"
-                aria-selected={selected === d}
-                aria-label={`${formatDateJa(d)} 期限のタスク ${list.length}件`}
+                aria-pressed={selected === d}
                 onClick={() => onDay(d)}
                 className={cx(
                   'flex min-h-16 flex-col items-stretch border-t border-slate-100 p-1 text-left align-top dark:border-navy-800 sm:min-h-24',
@@ -77,10 +76,17 @@ export function CalendarView({ tasks, month, day, onMonth, onDay, onOpen }: { ta
                 )}
                 data-date={d}
               >
-                <span className={cx('mb-0.5 inline-flex size-6 items-center justify-center self-start rounded-full text-xs tabular-nums', d === today && 'bg-navy-700 font-bold text-white')}>{parseISODate(d).getDate()}</span>
+                {/* 読み上げ: 「2026/10/15(木) 今日 期限のタスク 3件」+ 表示中のタスク名 (見た目の日付の数字は読み上げない) */}
+                <span className="sr-only">
+                  {formatDateJa(d)}
+                  {d === today && ' 今日'} 期限のタスク {list.length}件
+                </span>
+                <span aria-hidden className={cx('mb-0.5 inline-flex size-6 items-center justify-center self-start rounded-full text-xs tabular-nums', d === today && 'bg-navy-700 font-bold text-white')}>
+                  {parseISODate(d).getDate()}
+                </span>
                 {/* スマホは件数、PC はタスク名を表示 */}
                 {list.length > 0 && (
-                  <span className={cx('rounded px-1 text-[11px] font-semibold sm:hidden', overdue ? 'bg-red-100 text-red-700' : 'bg-navy-100 text-navy-800 dark:bg-navy-700 dark:text-white')} data-testid="calendar-count">
+                  <span aria-hidden className={cx('rounded px-1 text-[11px] font-semibold sm:hidden', overdue ? 'bg-red-100 text-red-700' : 'bg-navy-100 text-navy-800 dark:bg-navy-700 dark:text-white')} data-testid="calendar-count">
                     {list.length}件
                   </span>
                 )}

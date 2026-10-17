@@ -38,7 +38,6 @@ export function HorizontalBarChart({ data, unit, onSelect }: { data: BarDatum[];
               'group grid w-full grid-cols-[6.5rem_1fr_3rem] items-center gap-3 rounded-lg px-1 py-1.5 text-left transition-colors',
               active && 'bg-slate-50 dark:bg-navy-800/60',
             )}
-            aria-label={`${d.label} ${d.value}${unit}（全体の${share}%）`}
           >
             <span className="truncate text-[13px] text-slate-600 dark:text-slate-300">{d.label}</span>
             <span className="relative h-5">
@@ -58,6 +57,7 @@ export function HorizontalBarChart({ data, unit, onSelect }: { data: BarDatum[];
             <span className="text-right text-sm font-semibold tabular-nums text-slate-800 dark:text-slate-100">
               {d.value}
               <span className="ml-0.5 text-[11px] font-normal text-slate-400">{unit}</span>
+              <span className="sr-only">（全体の{share}%）</span>
             </span>
           </button>
         );
@@ -156,10 +156,18 @@ export function ProgressRing({ value, size = 56, stroke = 6, label }: { value: n
 }
 
 /** 細い進捗バー */
-export function ProgressBar({ value, className }: { value: number; className?: string }) {
+export function ProgressBar({ value, className, label = '進捗' }: { value: number; className?: string; label?: string }) {
   const v = Math.max(0, Math.min(100, value));
   return (
-    <div className={cx('h-1.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-navy-800', className)} role="progressbar" aria-valuenow={v} aria-valuemin={0} aria-valuemax={100}>
+    <div
+      className={cx('h-1.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-navy-800', className)}
+      role="progressbar"
+      aria-label={label}
+      aria-valuenow={v}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuetext={`${v}%`}
+    >
       <div className="h-full rounded-full bg-[var(--color-chart-done)] transition-[width] duration-500" style={{ width: `${v}%` }} />
     </div>
   );
@@ -223,7 +231,6 @@ export function SegmentedBarRows({
                 type="button"
                 onClick={() => onSelect?.(r.key)}
                 className="w-full rounded-xl px-2 py-2 text-left transition-colors hover:bg-slate-50 active:bg-slate-100 dark:hover:bg-navy-800/60 dark:active:bg-navy-800"
-                aria-label={`${r.label}：${primaryLabel}${r.primary}${unit}${summary ? `（${summary}）` : ''}`}
                 data-row={r.key}
               >
                 <span className="flex items-baseline justify-between gap-2">
@@ -234,6 +241,8 @@ export function SegmentedBarRows({
                     <span className="ml-0.5 text-[11px] font-normal text-slate-400">{unit}</span>
                   </span>
                 </span>
+                {/* 内訳は見た目では色の帯と下の小さな文字で示す。読み上げでは名前に続けて内訳を読む (表示中の文字はすべて名前に含める) */}
+                {summary && <span className="sr-only">（{summary}）</span>}
                 <span className="mt-1 block h-3.5 overflow-hidden rounded-full bg-slate-100 dark:bg-navy-800" aria-hidden>
                   {total > 0 && (
                     <span className="flex h-full gap-px transition-[width] duration-500" style={{ width: `max(${(total / max) * 100}%, ${parts.length * minSegmentPx}px)` }}>

@@ -26,6 +26,13 @@ export function navigate(to: string): void {
   }
   const target = to.startsWith('#') ? to : `#${to}`;
   if (window.location.hash === target) return;
+  // モーダルを閉じた直後 (「履歴を1つ戻す」の予約中) に移動する場合は、その予約を取り消す。
+  // 移動でモーダルの履歴を置き換えるので戻る必要はない。Safari (WebKit) では置き換えの直後もしばらく history.state が
+  // 古いまま見えるため、予約を残すと戻る処理が走り、移動が取り消されて元の画面に戻ってしまう (Phase 10 で修正)
+  if (pendingRelease && isModalEntry(history.state)) {
+    pendingRelease.cancelled = true;
+    pendingRelease = null;
+  }
   // モーダルを開いた履歴の上から画面移動する場合 (保存後に詳細へ移る等) は、その履歴を置き換える。
   // 「戻る」でモーダルの残骸に戻らず、1回で元の画面へ戻れるようにする
   if (isModalEntry(history.state)) {

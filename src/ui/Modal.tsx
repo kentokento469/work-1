@@ -34,6 +34,31 @@ export function ModalCancelButton({ children = 'キャンセル', disabled }: { 
 /**
  * スマホでは下からのボトムシート、PCでは中央ダイアログとして表示する。
  */
+/** 開いているダイアログ (後から開いたものが上) */
+const openPanels: HTMLElement[] = [];
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
+
+/** Tab・Shift+Tab のフォーカスをダイアログの中で循環させる (背面の画面へ移らない。WCAG 2.4.3) */
+function trapTab(e: KeyboardEvent, panel: HTMLElement) {
+  const items = [...panel.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => el.offsetParent !== null || el === document.activeElement);
+  if (!items.length) {
+    e.preventDefault();
+    panel.focus();
+    return;
+  }
+  const first = items[0]!;
+  const last = items[items.length - 1]!;
+  const active = document.activeElement as HTMLElement | null;
+  const inside = !!active && panel.contains(active);
+  if (e.shiftKey && (!inside || active === first || active === panel)) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && (!inside || active === last)) {
+    e.preventDefault();
+    first.focus();
+  }
+}
+
 export function Modal({ open, onClose, title, description, children, footer, size = 'md', dirty = false }: ModalProps) {
   const titleId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
@@ -54,8 +79,13 @@ export function Modal({ open, onClose, title, description, children, footer, siz
     const prevFocus = document.activeElement as HTMLElement | null;
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
+    const panel = panelRef.current;
+    if (panel) openPanels.push(panel);
     const onKey = (e: KeyboardEvent) => {
+      // 重なったダイアログでは、いちばん上のものだけが操作に応える
+      if (!panel || openPanels[openPanels.length - 1] !== panel) return;
       if (e.key === 'Escape') requestClose();
+      else if (e.key === 'Tab') trapTab(e, panel);
     };
     window.addEventListener('keydown', onKey);
     // ブラウザの戻る・スワイプ戻りでは画面より先にモーダルを閉じる。未保存の変更があれば閉じずに破棄確認を出す
@@ -73,6 +103,8 @@ export function Modal({ open, onClose, title, description, children, footer, siz
     if (first && !isTouch) first.focus();
     else panelRef.current?.focus();
     return () => {
+      const i = panel ? openPanels.lastIndexOf(panel) : -1;
+      if (i >= 0) openPanels.splice(i, 1);
       document.body.style.overflow = prevOverflow;
       window.removeEventListener('keydown', onKey);
       releaseHistory();
