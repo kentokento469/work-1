@@ -39,6 +39,13 @@ function Detail({ doc, autoProcess, keepType, run }: { doc: DocumentRecord; auto
   const [confirmPurge, setConfirmPurge] = useState(false);
   // 保存・確認完了したら編集モードを終える
   useEffect(() => setEditing(false), [doc.updatedAt]);
+  // この画面で確認完了にした直後は、次の作業 (次の書類の取り込み・一覧) を案内する (Phase 10)
+  const [justConfirmed, setJustConfirmed] = useState(false);
+  const [prevStatus, setPrevStatus] = useState(doc.status);
+  if (prevStatus !== doc.status) {
+    setPrevStatus(doc.status);
+    setJustConfirmed(prevStatus === 'needs_review' && doc.status === 'confirmed');
+  }
   const readOnly = !!doc.deletedAt || (doc.status !== 'needs_review' && !editing);
 
   const download = () => {
@@ -102,6 +109,21 @@ function Detail({ doc, autoProcess, keepType, run }: { doc: DocumentRecord; auto
     <>
       <BackLink href="#/documents">書類一覧</BackLink>
       <TargetNotices targetId={doc.id} />
+      {justConfirmed && (
+        <Card className="mb-4 border-emerald-200 bg-emerald-50/60 p-4 dark:border-emerald-900 dark:bg-emerald-950/30" data-testid="document-next-step">
+          <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-100" role="status">
+            確認が完了しました（{doc.number}）
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button size="sm" onClick={() => navigate('/documents/new')} data-testid="document-next-import">
+              次の書類を取り込む
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => navigate('/documents')}>
+              書類一覧へ
+            </Button>
+          </div>
+        </Card>
+      )}
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <h1 className="font-mono text-lg font-bold" data-testid="doc-number">
           {doc.number}

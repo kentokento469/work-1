@@ -56,6 +56,8 @@ export function InquiryDetailPage({ inquiryId, query }: { inquiryId: string; que
   const [resolveOpen, setResolveOpen] = useState(false);
   const [closeOpen, setCloseOpen] = useState(false);
   const [faqOpen, setFaqOpen] = useState(false);
+  /** 解決内容の欄に入力中 (未保存) の文。「解決済みにする」のダイアログに引き継ぐ (入力し直さなくてよいように。Phase 10) */
+  const [resolutionDraft, setResolutionDraft] = useState('');
   const [taskEditing, setTaskEditing] = useState<Task | null>(null);
   const justCreated = query.get('created') === '1';
 
@@ -285,14 +287,14 @@ export function InquiryDetailPage({ inquiryId, query }: { inquiryId: string; que
       <RequesterHistoryCard inquiry={inquiry} />
 
       {/* 解決内容 */}
-      <ResolutionCard inquiry={inquiry} onFaq={() => setFaqOpen(true)} />
+      <ResolutionCard inquiry={inquiry} onFaq={() => setFaqOpen(true)} onDraftChange={setResolutionDraft} />
 
       {/* 対応履歴 */}
       <HistoryCard inquiry={inquiry} />
 
       <EditInquiryModal open={editOpen} onClose={() => setEditOpen(false)} inquiry={inquiry} />
       <TaskProposalModal open={proposalOpen} onClose={() => setProposalOpen(false)} inquiry={inquiry} />
-      <ResolveModal open={resolveOpen} onClose={() => setResolveOpen(false)} inquiry={inquiry} />
+      <ResolveModal open={resolveOpen} onClose={() => setResolveOpen(false)} inquiry={inquiry} draft={resolutionDraft} />
       <CloseModal open={closeOpen} onClose={() => setCloseOpen(false)} inquiry={inquiry} tasks={tasks} />
       <FaqFormModal open={faqOpen} onClose={() => setFaqOpen(false)} source={inquiry} />
       <TaskFormModal open={!!taskEditing} onClose={() => setTaskEditing(null)} task={taskEditing ?? undefined} />
@@ -330,11 +332,12 @@ function SolutionsCard({ inquiry }: { inquiry: Inquiry }) {
   );
 }
 
-function ResolutionCard({ inquiry, onFaq }: { inquiry: Inquiry; onFaq: () => void }) {
+function ResolutionCard({ inquiry, onFaq, onDraftChange }: { inquiry: Inquiry; onFaq: () => void; onDraftChange: (text: string) => void }) {
   const { run } = useAppData();
   const [text, setText] = useState(inquiry.resolution);
   const [saving, setSaving] = useState(false);
   useEffect(() => setText(inquiry.resolution), [inquiry.resolution]);
+  useEffect(() => onDraftChange(text), [text, onDraftChange]);
   const closed = inquiry.status === 'closed';
   const dirty = text.trim() !== inquiry.resolution;
   return (
@@ -633,12 +636,13 @@ function TaskProposalModal({ open, onClose, inquiry }: { open: boolean; onClose:
   );
 }
 
-function ResolveModal({ open, onClose, inquiry }: { open: boolean; onClose: () => void; inquiry: Inquiry }) {
+function ResolveModal({ open, onClose, inquiry, draft }: { open: boolean; onClose: () => void; inquiry: Inquiry; draft: string }) {
   const { run, data } = useAppData();
   const [text, setText] = useState(inquiry.resolution);
   const [saving, setSaving] = useState(false);
   useEffect(() => {
-    if (open) setText(inquiry.resolution);
+    // 解決内容の欄に入力中の文があれば、それを引き継ぐ
+    if (open) setText(draft.trim() ? draft : inquiry.resolution);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
   const linkedFaq = data.faqs.find((f) => inquiry.faqIds.includes(f.id));

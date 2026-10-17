@@ -203,6 +203,8 @@ describe('発注支援', () => {
     expect(status(d, ITEM.toner).onHand).toBe(1);
     await inv.transitionOrder(po.id, 'submit', '加藤 由美');
     await expect(inv.transitionOrder(po.id, 'approve', '')).rejects.toThrow('承認者名');
+    // Phase 10: 申請者本人は承認できない (空白の違いも同じ人とみなす)
+    await expect(inv.transitionOrder(po.id, 'approve', '加藤　由美')).rejects.toThrow('本人は承認できません');
     await inv.transitionOrder(po.id, 'approve', '佐藤 健一');
     d = await service.loadSnapshot();
     expect(status(d, ITEM.toner)).toMatchObject({ onHand: 1, onOrder: 3 });
