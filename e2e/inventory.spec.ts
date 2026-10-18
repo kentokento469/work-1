@@ -310,6 +310,8 @@ test('[Phase3] 退職予定者の返却タスク／提案の見送り', async ({
 
   // 見送り: 提案は消え、処理履歴に残る
   await gotoHash(page, '#/automation');
+  // 画面の表示前に数えると 0 になる (WebKit で発生) ため、提案の表示を待ってから数える
+  await expect(page.getByTestId('proposal-card').first()).toBeVisible();
   const before = await page.getByTestId('proposal-card').count();
   const first = page.getByTestId('proposal-card').first();
   const title = (await first.getAttribute('data-proposal-title'))!;
