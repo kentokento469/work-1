@@ -412,3 +412,8 @@ interface AssistProvider {
 - 営業日 `domain/calendar.ts`：日本の祝日（規則から計算）・会社の休業日（設定 `settings` の id `calendar`）・営業日の計算。`AppData` がデータの読み込みごとに `setBusinessCalendar` で反映し、期限の計算はこの設定を使う
 - 繰り返し `Recurrence.adjust`（休みの日の調整）・`basis`（完了日基準）・`lastRaw`（調整前の予定日。次回の起点）。`nextScheduledDue`
 - 性能の計測 `e2e/perf.spec.ts`（`PERF=1` のときだけ実行）
+
+## 29. Phase 13：複数ユーザー・クラウドの設計（設計のみ）
+
+- 設計書 [PHASE13_DESIGN.md](PHASE13_DESIGN.md)。オーナーの承認まで外部サービスは導入しない
+- 役割と権限の表 `domain/permissions.ts`（`PERMISSION_MATRIX`・`can`・`canApprovePurchase`・`canChangeRole`）。Phase 14 でサーバー側の判定と画面の表示の両方から使う予定。現在は画面・サービスから使っていない（動作の変更なし）
