@@ -24,8 +24,13 @@ export function useQueryState<T extends Record<string, string>>(defaults: T): [T
 
   // 同じ画面内のリンク (例: 分析カード → 一覧の絞り込み) で URL が変わった場合も追従する
   useEffect(() => {
-    const onHash = () => setState(read());
+    const onHash = () => {
+      const next = read();
+      setState((cur) => (JSON.stringify(cur) === JSON.stringify(next) ? cur : next));
+    };
     window.addEventListener('hashchange', onHash);
+    // 最初の描画から登録までの間に URL が変わった場合に追いつく (WebKit で取りこぼしが発生)
+    onHash();
     return () => window.removeEventListener('hashchange', onHash);
     // read は defaults にのみ依存し、defaults は固定値
   }, []);
