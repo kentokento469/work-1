@@ -4,7 +4,8 @@
  * タスク 1,000 / 10,000 / 50,000 件と、それに比例した社員・問い合わせ・書類・操作履歴を IndexedDB に直接入れて、
  * 起動・一覧・検索・保存・画面移動の時間と、JS のメモリ使用量を測る。結果は docs/PHASE12_RESULTS.md に記録する。
  */
-import { expect, test, type Page } from './fixtures';
+// 固定時計 (fixtures の clock.install) は performance も置き換えるため、計測では使わない
+import { expect, test, type Page } from '@playwright/test';
 
 test.skip(!process.env.PERF, 'PERF=1 のときだけ実行');
 test.setTimeout(600_000);
@@ -102,6 +103,8 @@ async function ms(fn: () => Promise<unknown>): Promise<number> {
 
 for (const n of SIZES) {
   test(`[Phase12] 性能：タスク ${n.toLocaleString()} 件`, async ({ page }) => {
+    // 保存の内訳の記録を有効にする (src/app/AppData.tsx の perfMark)
+    await page.addInitScript(() => ((window as unknown as { __WC_PERF__: boolean }).__WC_PERF__ = true));
     await page.goto('/');
     await expect(page.getByRole('heading', { name: 'ダッシュボード' })).toBeVisible();
     await seed(page, n);
@@ -131,12 +134,26 @@ for (const n of SIZES) {
       await expect(page.getByTestId('scope-open')).toHaveAttribute('aria-selected', 'true', { timeout: 120_000 });
       await expect(page.locator('[data-testid="task-list"] [data-testid="task-item"]').first()).toBeVisible({ timeout: 120_000 });
     });
-    // 5. 保存 (クイック追加 → 一覧に表示)
-    result.save = await ms(async () => {
-      await page.getByTestId('quick-add-input').fill('計測の保存');
-      await page.getByTestId('quick-add-submit').click();
-      await expect(page.getByText('「計測の保存」を追加しました')).toBeVisible({ timeout: 120_000 });
-    });
+    // 5. 保存 (クイック追加 → 一覧に表示)。3回の中央値と、内訳 (書き込み・読み込み・再計算。AppData の performance.measure)
+    const saves: number[] = [];
+    const parts: Record<string, number[]> = {};
+    for (let k = 0; k < 3; k++) {
+      await page.evaluate(() => performance.clearMeasures());
+      saves.push(
+        await ms(async () => {
+          await page.getByTestId('quick-add-input').fill(`計測の保存${k}`);
+          await page.getByTestId('quick-add-submit').click();
+          await expect(page.getByText(`「計測の保存${k}」を追加しました`)).toBeVisible({ timeout: 120_000 });
+        }),
+      );
+      const m = await page.evaluate(() => performance.getEntriesByType('measure').filter((e) => e.name.startsWith('wc:')).map((e) => [e.name, e.duration] as const));
+      const sum: Record<string, number> = {};
+      for (const [name, d] of m) sum[name] = (sum[name] ?? 0) + d;
+      for (const [name, d] of Object.entries(sum)) (parts[name] ??= []).push(Math.round(d));
+    }
+    const median = (a: number[]) => [...a].sort((x, y) => x - y)[Math.floor(a.length / 2)]!;
+    result.save = median(saves);
+    for (const [name, a] of Object.entries(parts)) result[`save_${name.slice(3)}`] = median(a);
     // 6. 画面の移動 (ダッシュボード → 社員 → ヘルプデスク)
     result.navigate = await ms(async () => {
       await page.evaluate(() => (window.location.hash = '#/'));

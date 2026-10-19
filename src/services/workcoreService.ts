@@ -11,7 +11,8 @@ import { generateId, nowISO } from '../domain/id';
 import { cleanContact, normalizeEmployeeNumber, validateEmployee, validateRule, type EmployeeInput, type RuleInput, type TaskInput } from '../domain/validation';
 import { type DataSnapshot, type Department, type Employee, type OnboardingRule, type Task, type TaskStatus } from '../domain/types';
 import type { BackupFile } from '../data/backup';
-import { DATA_STORES, MIGRATION_CHECK_KEY, STORE_NAMES, type WorkCoreDB } from '../data/db';
+import { DATA_STORES, MIGRATION_CHECK_KEY, STORE_NAMES, type DataStoreName, type WorkCoreDB } from '../data/db';
+import { applyChanges, sortSnapshot, type FetchedChanges, type StoreChanges } from '../data/snapshot';
 import { emptyInventory } from '../domain/inventory/defaults';
 import { InventoryService } from './inventoryService';
 import { createDemoData, createHelpdeskDemoData } from '../demo/demoData';
@@ -81,21 +82,28 @@ export class WorkCoreService {
     const tx = this.db.transaction([...DATA_STORES], 'readonly');
     const entries = await Promise.all(DATA_STORES.map(async (name) => [name, await tx.objectStore(name).getAll()] as const));
     await tx.done;
-    const data = Object.fromEntries(entries) as unknown as DataSnapshot;
-    data.departments.sort((a, b) => a.order - b.order);
-    data.activities.sort((a, b) => b.at.localeCompare(a.at));
-    data.inquiryCategories.sort((a, b) => a.order - b.order);
-    data.inquiries.sort((a, b) => b.receivedAt.localeCompare(a.receivedAt));
-    data.items.sort((a, b) => a.code.localeCompare(b.code));
-    data.assets.sort((a, b) => a.assetNumber.localeCompare(b.assetNumber));
-    data.stockMovements.sort((a, b) => b.at.localeCompare(a.at));
-    data.assetEvents.sort((a, b) => b.at.localeCompare(a.at));
-    data.purchaseOrders.sort((a, b) => b.number.localeCompare(a.number));
-    data.locations.sort((a, b) => a.order - b.order);
-    data.equipmentRules.sort((a, b) => a.order - b.order);
-    data.automationRuns.sort((a, b) => b.at.localeCompare(a.at));
-    data.documents.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-    return data;
+    return sortSnapshot(Object.fromEntries(entries) as unknown as DataSnapshot);
+  }
+
+  /**
+   * 変わったデータだけを読み直して、スナップショットに反映する (Phase 13R。保存のたびの全件の読み直しをやめる)。
+   * changes は ChangeTracker が記録した、書き込まれたデータの種類と id
+   */
+  async loadChanges(prev: DataSnapshot, changes: StoreChanges): Promise<DataSnapshot> {
+    const stores = Object.keys(changes) as DataStoreName[];
+    if (!stores.length) return prev;
+    const tx = this.db.transaction(stores, 'readonly');
+    const fetched: FetchedChanges = {};
+    await Promise.all(
+      stores.map(async (name) => {
+        const keys = changes[name]!;
+        const store = tx.objectStore(name);
+        if (keys === 'all') fetched[name] = { all: (await store.getAll()) as { id: string }[] };
+        else fetched[name] = { rows: new Map(await Promise.all(keys.map(async (k) => [k, ((await store.get(k)) as { id: string } | undefined) ?? null] as const))) };
+      }),
+    );
+    await tx.done;
+    return applyChanges(prev, fetched);
   }
 
   /** 初回起動時のみデモデータを投入する */
@@ -637,8 +645,12 @@ export class WorkCoreService {
    * 承認が不要な操作 (タスク作成など) だけの提案に限り、処理履歴に「自動」として記録する。
    * 同じ提案は処理履歴のキーで一度しか実行されない (再読み込み・連続呼び出しでも二重実行しない)
    */
-  async runAutoAutomations(): Promise<{ title: string; results: string[] }[]> {
-    const data = await this.loadSnapshot();
+  /**
+   * data: 画面が保持している最新のスナップショット (Phase 13R。保存のたびに全件を読み直さないため)。
+   * 省略した場合は読み込む。実行する操作 (applyProposal) は、その時点のデータベースの内容で改めて判定する
+   */
+  async runAutoAutomations(current?: DataSnapshot): Promise<{ title: string; results: string[] }[]> {
+    const data = current ?? (await this.loadSnapshot());
     const settings = readAutomationSettings(data);
     const defs = ALL_AUTOMATIONS.filter((d) => {
       const s = ruleSetting(d, settings);

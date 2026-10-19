@@ -35,10 +35,16 @@ export function addDays(value: ISODate, days: number): ISODate {
   return toISODate(d);
 }
 
-/** b - a の日数差 */
+/** 日付の通し番号 (UTC の 1970-01-01 からの日数)。日数の差だけに使う (タイムゾーン・夏時間の影響を受けない) */
+function dayNumber(value: ISODate): number {
+  const m = ISO_DATE_RE.exec(value);
+  if (!m) throw new Error(`不正な日付形式です: ${value}`);
+  return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) / 86_400_000;
+}
+
+/** b - a の日数差。通知・ダッシュボードで件数 × 回呼ばれるため、Date オブジェクトを作らずに計算する (Phase 13R) */
 export function diffDays(a: ISODate, b: ISODate): number {
-  const ms = parseISODate(b).getTime() - parseISODate(a).getTime();
-  return Math.round(ms / 86_400_000);
+  return dayNumber(b) - dayNumber(a);
 }
 
 export function isWeekend(value: ISODate): boolean {

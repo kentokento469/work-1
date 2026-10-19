@@ -41,12 +41,12 @@ import type { Project, SettingRecord } from '../domain/types';
 export const DB_NAME = 'workcore';
 /** 移行後の点検が済んでいないことを示す meta のキー */
 export const MIGRATION_CHECK_KEY = 'pendingMigrationCheck';
-export const DB_VERSION = 6;
+export const DB_VERSION = 7;
 
 export interface WorkCoreSchema extends DBSchema {
   departments: { key: string; value: Department };
   employees: { key: string; value: Employee; indexes: { byNumber: string; byDepartment: string } };
-  tasks: { key: string; value: Task; indexes: { byEmployee: string; byStatus: string; byInquiry: string } };
+  tasks: { key: string; value: Task; indexes: { byEmployee: string; byStatus: string; byInquiry: string; byParent: string } };
   rules: { key: string; value: OnboardingRule };
   activities: { key: string; value: ActivityLog; indexes: { byAt: string } };
   meta: { key: string; value: { key: string; value: unknown } };
@@ -179,6 +179,15 @@ async function migrateToV6(db: IDBPDatabase<WorkCoreSchema>, tx: UpgradeTx) {
   await tx.objectStore('meta').put({ key: 'schemaMigratedToV6', value: new Date().toISOString() });
 }
 
+/**
+ * v6 → v7 (Phase 13R): タスクの親 (parentTaskId) の索引を追加。サブタスクの検索で全タスクを読まないため。
+ * データは変更しない (parentTaskId が未設定・null のタスクは索引に入らない)
+ */
+async function migrateToV7(_db: IDBPDatabase<WorkCoreSchema>, tx: UpgradeTx) {
+  tx.objectStore('tasks').createIndex('byParent', 'parentTaskId');
+  await tx.objectStore('meta').put({ key: 'schemaMigratedToV7', value: new Date().toISOString() });
+}
+
 export function openWorkCoreDB(name = DB_NAME, version = DB_VERSION): Promise<WorkCoreDB> {
   return openDB<WorkCoreSchema>(name, version, {
     async upgrade(db, oldVersion, _newVersion, tx) {
@@ -201,6 +210,7 @@ export function openWorkCoreDB(name = DB_NAME, version = DB_VERSION): Promise<Wo
       if (oldVersion < 4 && version >= 4) await migrateToV4(db, tx);
       if (oldVersion < 5 && version >= 5) await migrateToV5(db, tx);
       if (oldVersion < 6 && version >= 6) await migrateToV6(db, tx);
+      if (oldVersion < 7 && version >= 7) await migrateToV7(db, tx);
       // 既存のデータを移行した場合は、起動後に整合性を点検する (Phase 9。点検は WorkCoreService.verifyMigration)
       if (oldVersion > 0) await tx.objectStore('meta').put({ key: MIGRATION_CHECK_KEY, value: { from: oldVersion, to: version, at: new Date().toISOString() } });
     },

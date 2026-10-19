@@ -413,7 +413,11 @@ interface AssistProvider {
 - 繰り返し `Recurrence.adjust`（休みの日の調整）・`basis`（完了日基準）・`lastRaw`（調整前の予定日。次回の起点）。`nextScheduledDue`
 - 性能の計測 `e2e/perf.spec.ts`（`PERF=1` のときだけ実行）
 
-## 29. Phase 13：複数ユーザー・クラウドの設計（設計のみ）
+## 29. Phase 13：保存の差分更新（`data/changeTracker.ts`・`data/snapshot.ts`）
 
-- 設計書 [PHASE13_DESIGN.md](PHASE13_DESIGN.md)。オーナーの承認まで外部サービスは導入しない
-- 役割と権限の表 `domain/permissions.ts`（`PERMISSION_MATRIX`・`can`・`canApprovePurchase`・`canChangeRole`）。Phase 14 でサーバー側の判定と画面の表示の両方から使う予定。現在は画面・サービスから使っていない（動作の変更なし）
+- **書き込みの記録** `ChangeTracker`：サービスに渡す接続を Proxy で包み、書き込みのトランザクションの `put`/`add`/`delete`/`clear`・カーソルを「データの種類 → id」として記録する。トランザクションの完了時だけ確定（中断した書き込みは反映しない）。id が分からない操作（全削除・カーソル）はその種類を「すべて読み直す」
+- **差分の反映** `WorkCoreService.loadChanges(prev, changes)` → `applyChanges`：変わった id だけを読み、並び順の位置に入れる。並び順は `sortSnapshot` に1か所で定義（全件の読み込みと同じ順になる）。変わらなかった種類は同じ配列のまま（`WeakMap` のキャッシュが効く）
+- `AppData.refresh`：差分の反映を1つずつ順に実行（同時に実行すると、古いデータから計算した結果で変更が消えるため）。別のタブには変わった id を送り、受け取ったタブも差分だけを読む。日付の変更・競合の確認は全件の読み直し
+- DB v7：タスクの `byParent` 索引（サブタスクの検索で全タスクを読まない）。タスクの入力の検証は、親・前提タスク（循環の判定のため先までたどる）・自分のサブタスクだけを読む
+- 単体テスト `data/snapshotDelta.test.ts`：各種の操作のあと「差分の反映 = 全件の読み直し」を確認（記録の漏れの検出）
+- 旧 Phase 13 の複数ユーザー・クラウドの設計（[PHASE13_DESIGN.md](PHASE13_DESIGN.md)）は中止。役割と権限の表は削除した

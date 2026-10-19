@@ -8,5 +8,6 @@ export function compareDue(a: Pick<Task, 'dueDate'>, b: Pick<Task, 'dueDate'>): 
   if (a.dueDate === b.dueDate) return 0;
   if (!a.dueDate) return 1;
   if (!b.dueDate) return -1;
-  return a.dueDate.localeCompare(b.dueDate);
+  // YYYY-MM-DD は文字の順 = 日付の順 (localeCompare より速い。一覧の並べ替えで件数 × log 件数回呼ばれる)
+  return a.dueDate < b.dueDate ? -1 : 1;
 }

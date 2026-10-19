@@ -48,14 +48,35 @@ function normalize(input: TaskInput, existingIds: Set<string>): TaskInput {
 export class TaskService {
   constructor(private readonly db: WorkCoreDB, private readonly clock: () => string) {}
 
-  private async context(tx: WriteTx, selfId?: string) {
-    const [emps, depts, projects, tasks] = await Promise.all([
+  /**
+   * 入力の検証に使う情報。タスクは検証に必要なものだけを読む (全件を読まない。Phase 13R):
+   * 親タスク・前提タスクとその先の前提 (循環の判定)・自分のサブタスク (親を設定できるかの判定)
+   */
+  private async context(tx: WriteTx, input: Pick<TaskInput, 'parentTaskId' | 'dependsOn'>, selfId?: string) {
+    const [emps, depts, projects] = await Promise.all([
       tx.objectStore('employees').getAllKeys(),
       tx.objectStore('departments').getAllKeys(),
       tx.objectStore('projects').getAllKeys(),
-      tx.objectStore('tasks').getAll(),
     ]);
-    return { employeeIds: emps, departmentIds: depts, projectIds: projects, tasks, selfId };
+    const store = tx.objectStore('tasks');
+    const byId = new Map<string, Task>();
+    const fetch = async (id: string) => {
+      if (byId.has(id)) return byId.get(id);
+      const t = await store.get(id);
+      if (t) byId.set(id, t);
+      return t;
+    };
+    if (input.parentTaskId) await fetch(input.parentTaskId);
+    const queue = [...(input.dependsOn ?? [])];
+    const seen = new Set<string>();
+    while (queue.length) {
+      const id = queue.pop()!;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      queue.push(...((await fetch(id))?.dependsOn ?? []));
+    }
+    if (selfId) for (const t of await store.index('byParent').getAll(selfId)) byId.set(t.id, t);
+    return { employeeIds: emps, departmentIds: depts, projectIds: projects, tasks: [...byId.values()], selfId };
   }
 
   /** 問い合わせ由来のタスクの状態変化を、問い合わせの対応履歴にも残す */
@@ -95,7 +116,7 @@ export class TaskService {
 
   async createTask(input: TaskInput, opts: { source?: TaskSource } = {}): Promise<Task> {
     const tx = this.db.transaction([...TASK_STORES], 'readwrite');
-    const ctx = await this.context(tx);
+    const ctx = await this.context(tx, input);
     const clean = normalize(input, new Set(ctx.tasks.map((t) => t.id)));
     const v = validateTask(clean, ctx);
     if (!v.ok) return abortWith(tx, fieldError(v.errors));
@@ -126,7 +147,7 @@ export class TaskService {
       const current = await tx.objectStore('tasks').get(id);
       if (!current) return abortWith(tx, '対象のタスクが見つかりません（別のタブ・画面で削除された可能性があります）');
       if (opts.expectedUpdatedAt && current.updatedAt !== opts.expectedUpdatedAt) return abortWith(tx, conflictError('タスク', current.updatedAt));
-      const ctx = await this.context(tx, id);
+      const ctx = await this.context(tx, input, id);
       const clean = normalize(input, new Set(ctx.tasks.map((t) => t.id)));
       const v = validateTask(clean, ctx);
       if (!v.ok) return abortWith(tx, fieldError(v.errors));
@@ -160,7 +181,7 @@ export class TaskService {
       await tx.objectStore('tasks').put(task);
       await this.reflectToInquiry(tx, current, task);
       if (status === 'done' && opts.completeSubtasks) {
-        const subs = (await tx.objectStore('tasks').getAll()).filter((t) => t.parentTaskId === id && t.status !== 'done');
+        const subs = (await tx.objectStore('tasks').index('byParent').getAll(id)).filter((t) => t.status !== 'done');
         for (const s of subs) {
           const done = { ...s, status: 'done' as const, updatedAt: now, completedAt: now };
           await tx.objectStore('tasks').put(done);
@@ -179,7 +200,7 @@ export class TaskService {
     return guardTx(tx, async () => {
       const current = await tx.objectStore('tasks').get(id);
       if (!current) return abortWith(tx, '対象のタスクが見つかりません');
-      const subs = (await tx.objectStore('tasks').getAll()).filter((t) => t.parentTaskId === id);
+      const subs = await tx.objectStore('tasks').index('byParent').getAll(id);
       for (const t of [current, ...subs]) {
         await tx.objectStore('tasks').delete(t.id);
         if (t.inquiryId) await appendInquiryEvent(tx, t.inquiryId, inquiryEvent('task', `タスク「${t.title}」を削除しました`));
@@ -250,7 +271,7 @@ export class TaskService {
     const t = await tx.objectStore('tasks').get(taskId);
     if (!t) return abortWith(tx, '対象のタスクが見つかりません');
     const input: TaskInput = { ...t, dueDate };
-    const v = validateTask(input, await this.context(tx, taskId));
+    const v = validateTask(input, await this.context(tx, input, taskId));
     if (!v.ok) return abortWith(tx, fieldError(v.errors));
     const next = { ...t, dueDate, updatedAt: nowISO() };
     await tx.objectStore('tasks').put(next);

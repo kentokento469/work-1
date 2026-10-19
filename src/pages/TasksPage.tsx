@@ -119,7 +119,12 @@ export function TasksPage({ query }: { query: URLSearchParams }) {
     }
     return { open, overdue };
   }, [data.tasks, today]);
-  const counts = useMemo(() => Object.fromEntries(SCOPES.map((s) => [s.key, base.filter((t) => inScope(t, s.key, today, weekEnd)).length])) as Record<Scope, number>, [base, today, weekEnd]);
+  // 範囲ごとの件数は1回の走査で数える (範囲の数 × 全件の走査をしない。Phase 13R)
+  const counts = useMemo(() => {
+    const c = Object.fromEntries(SCOPES.map((s) => [s.key, 0])) as Record<Scope, number>;
+    for (const t of base) for (const s of SCOPES) if (inScope(t, s.key, today, weekEnd)) c[s.key]++;
+    return c;
+  }, [base, today, weekEnd]);
 
   const filtered = useMemo(() => {
     const list = base.filter((t) => inScope(t, scope, today, weekEnd));

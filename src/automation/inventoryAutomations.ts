@@ -7,6 +7,7 @@ import { toPreviousBusinessDayCal } from '../domain/calendar';
 import { normalizeText } from '../domain/text';
 import type { DataSnapshot, Employee, ISODate } from '../domain/types';
 import type { Asset, InventoryCategory, Item } from '../domain/inventory/types';
+import { hasTask } from './taskKeys';
 import { actionSignature, fingerprint, type AutomationAction, type AutomationDefinition, type AutomationProposal } from './engine';
 
 const JOSHIS = 'dept_joshis';
@@ -22,9 +23,6 @@ function dueBefore(date: ISODate, today: ISODate, daysBefore = 1): ISODate {
   return d < today ? today : d;
 }
 
-function hasTask(data: DataSnapshot, ruleKey: string): boolean {
-  return data.tasks.some((t) => t.ruleId === ruleKey);
-}
 
 /** 社員ごとの機器の確保状況 (品目別) */
 function coverage(data: DataSnapshot, employeeId: string) {

@@ -54,6 +54,19 @@ describe('Phase 7: 汎用タスク', () => {
     expect((await s.loadSnapshot()).tasks.filter((t) => t.parentTaskId === parent.id).every((t) => t.status === 'done')).toBe(true);
   });
 
+  it('Phase 13R: 検証で必要なタスクだけを読む場合も、離れた循環とサブタスクを持つタスクの親の設定を防ぐ', async () => {
+    const { s } = await setup();
+    const a = await s.createTask(simple('A'));
+    const b = await s.createTask(simple('B', { dependsOn: [a.id] }));
+    const c = await s.createTask(simple('C', { dependsOn: [b.id] }));
+    // A → C → B → A の循環 (直接の前提ではなく、2段先で戻ってくる)
+    await expect(s.updateTask(a.id, { ...simple('A'), dependsOn: [c.id] })).rejects.toThrow('循環');
+    const parent = await s.createTask(simple('親'));
+    await s.createTask(simple('子', { parentTaskId: parent.id }));
+    await expect(s.updateTask(parent.id, { ...simple('親'), parentTaskId: a.id })).rejects.toThrow('サブタスクを持つタスク');
+    await expect(s.tasks.setDueDate(parent.id, '2026-10-20')).resolves.toMatchObject({ dueDate: '2026-10-20' });
+  });
+
   it('依存関係: 循環・自分自身は作れない', async () => {
     const { s } = await setup();
     const buy = await s.createTask(simple('機器を購入'));

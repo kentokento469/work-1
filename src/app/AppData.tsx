@@ -1,10 +1,13 @@
 /**
  * アプリ全体のデータ状態。
- * 変更操作は必ず run() を通し、サービス層で永続化 → スナップショット再読込 → トースト表示 を行う。
+ * 変更操作は必ず run() を通し、サービス層で永続化 → スナップショットに反映 → トースト表示 を行う。
  * これによりタスクのステータス変更などがダッシュボードへ即時反映される。
+ * 反映は差分で行う (Phase 13R): 書き込まれたデータの種類と id を ChangeTracker が記録し、その分だけ読み直す
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { openWorkCoreDB } from '../data/db';
+import { ChangeTracker } from '../data/changeTracker';
+import type { StoreChanges } from '../data/snapshot';
 import { computeDashboard, type DashboardStats } from '../domain/analytics';
 import { computeHelpdeskStats, type HelpdeskStats } from '../domain/helpdesk/analytics';
 import { computeAllStock, type StockStatus } from '../domain/inventory/stock';
@@ -55,26 +58,36 @@ export interface RunOptions<T> {
   undoMessage?: string;
 }
 
+/**
+ * 性能の計測 (保存の内訳: 書き込み・読み込み・再計算)。性能のテスト (e2e/perf.spec.ts) が window.__WC_PERF__ を
+ * 設定したときだけ記録する (通常の利用では記録を溜めない)
+ */
+const perfOn = () => (globalThis as { __WC_PERF__?: boolean }).__WC_PERF__ === true;
+const perfMark = (name: string) => void (perfOn() && performance.mark(name));
+const perfMeasure = (name: string, start: string, end?: string) => void (perfOn() && performance.measure(name, start, end));
+
 const Ctx = createContext<AppDataValue | null>(null);
 
 /** 同じ端末の別のタブへ「データが変わった」ことを知らせるチャンネル名 (データ本体は送らない) */
 const SYNC_CHANNEL = 'workcore-data';
-type SyncMessage = { type: 'changed'; at: number };
+/** changes: 変わったデータの種類と id (受け取ったタブは差分だけを読み直す)。無い場合は全件を読み直す */
+type SyncMessage = { type: 'changed'; at: number; changes?: StoreChanges };
 
 // 起動処理は1回だけ実行する (React StrictMode で effect が二重実行されても初期データ投入が重複しないように)
-let bootPromise: Promise<{ service: WorkCoreService; seeded: boolean; migrationProblems: number }> | null = null;
+let bootPromise: Promise<{ service: WorkCoreService; tracker: ChangeTracker; seeded: boolean; migrationProblems: number }> | null = null;
 function boot() {
   bootPromise ??= (async () => {
     if (!window.indexedDB) throw new StorageUnavailableError();
     const db = await openWorkCoreDB();
-    const service = new WorkCoreService(db);
+    const tracker = new ChangeTracker();
+    const service = new WorkCoreService(tracker.wrap(db));
     const seeded = await service.ensureInitialized();
     // 版の更新の直後は、移行したデータを点検する (失敗しても起動は続ける)
     const migration = await service.verifyMigration().catch((e) => {
       console.error('[WorkCore] 移行後の点検に失敗', e);
       return null;
     });
-    return { service, seeded, migrationProblems: migration?.errors.length ?? 0 };
+    return { service, tracker, seeded, migrationProblems: migration?.errors.length ?? 0 };
   })();
   return bootPromise;
 }
@@ -110,6 +123,40 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
    * 実行中に再度呼ばれた場合は、終わってからもう一度だけ実行する (同時実行しない)。二重実行は処理履歴のキーで防ぐ
    */
   const autoState = useRef({ running: false, again: false });
+  // 差分の反映は同時に1つだけ (2つが同じ古いデータから計算すると、片方の変更が消えるため)
+  const trackerRef = useRef<ChangeTracker | null>(null);
+  const dataRef = useRef<DataSnapshot | null>(null);
+  const queue = useRef<Promise<unknown>>(Promise.resolve());
+  /**
+   * データを読み直してスナップショットに反映する。
+   * - 既定: この画面で書き込んだ分 (ChangeTracker の記録) だけを読み直す
+   * - changes: 別のタブから届いた変更の分だけ / full: 全件を読み直す (起動・日付の変更・競合の確認)
+   * 戻り値は反映した変更 (別のタブへ知らせる)
+   */
+  const refresh = useCallback((svc: WorkCoreService, opts: { full?: boolean; changes?: StoreChanges } = {}) => {
+    const job = queue.current.then(async (): Promise<StoreChanges> => {
+      const tracker = trackerRef.current!;
+      const prev = dataRef.current;
+      if (opts.full || !prev) {
+        tracker.discard();
+        const data = await svc.loadSnapshot();
+        dataRef.current = data;
+        setState({ status: 'ready', service: svc, data });
+        return {};
+      }
+      const changes = opts.changes ?? (await tracker.take());
+      if (!Object.keys(changes).length) return changes;
+      const data = await svc.loadChanges(prev, changes).catch((e) => {
+        console.error('[WorkCore] 差分の読み込みに失敗。全件を読み直します', e);
+        return svc.loadSnapshot();
+      });
+      dataRef.current = data;
+      setState({ status: 'ready', service: svc, data });
+      return changes;
+    });
+    queue.current = job.catch(() => undefined);
+    return job;
+  }, []);
   const runAuto = useCallback(async (svc: WorkCoreService) => {
     if (autoState.current.running) {
       autoState.current.again = true;
@@ -119,25 +166,28 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     try {
       do {
         autoState.current.again = false;
-        const done = await svc.runAutoAutomations().catch(() => []);
+        const done = await svc.runAutoAutomations(dataRef.current ?? undefined).catch(() => []);
         if (done.length) {
-          setState({ status: 'ready', service: svc, data: await svc.loadSnapshot() });
+          notifyRef.current(await refresh(svc));
           toast.info(`自動化を実行しました：${done.map((d) => d.title).join('、')}（処理履歴は自動化センター）`);
         }
       } while (autoState.current.again);
     } finally {
       autoState.current.running = false;
     }
-  }, [toast]);
-
+  }, [toast, refresh]);
+  const notifyRef = useRef<(changes: StoreChanges) => void>(() => undefined);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const { service, seeded, migrationProblems } = await boot();
+        const { service, tracker, seeded, migrationProblems } = await boot();
+        trackerRef.current = tracker;
+        tracker.discard();
         const data = await service.loadSnapshot();
         if (cancelled) return;
+        dataRef.current = data;
         setState({ status: 'ready', service, data });
         if (seeded) toast.info('デモデータを読み込みました。自由に操作してお試しください。');
         if (migrationProblems) toast.error(`データの版を更新しましたが、自動で直せない問題が${migrationProblems}件あります。データ管理の「データを点検する」で確認してください`);
@@ -156,12 +206,12 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
 
   const service = state.status === 'ready' ? state.service : null;
 
+  /** 全件を読み直す (日付の変更・競合の確認など、まれな場合だけ) */
   const reload = useCallback(async () => {
     if (!service) return;
-    const data = await service.loadSnapshot();
-    setState({ status: 'ready', service, data });
+    await refresh(service, { full: true });
     void runAuto(service);
-  }, [service, runAuto]);
+  }, [service, runAuto, refresh]);
 
   /**
    * 複数タブ: 変更を保存したら別のタブへ知らせ、受け取ったタブは最新のデータを読み直す。
@@ -175,7 +225,8 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     channel.current = ch;
     ch.onmessage = (ev: MessageEvent<SyncMessage>) => {
       if (ev.data?.type !== 'changed') return;
-      void reload().then(() => {
+      const changes = ev.data.changes;
+      void (changes ? refresh(service, { changes }).then(() => void runAuto(service)) : reload()).then(() => {
         // 続けて届いた場合は1回だけ知らせる
         if (Date.now() - lastSyncToast.current > 5000) toast.info('別のタブでの変更を反映しました');
         lastSyncToast.current = Date.now();
@@ -185,20 +236,25 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       ch.close();
       channel.current = null;
     };
-  }, [service, reload, toast]);
-  const notifyOtherTabs = useCallback(() => {
+  }, [service, reload, refresh, runAuto, toast]);
+  const notifyOtherTabs = useCallback((changes: StoreChanges) => {
+    if (!Object.keys(changes).length) return;
     try {
-      channel.current?.postMessage({ type: 'changed', at: Date.now() } satisfies SyncMessage);
+      channel.current?.postMessage({ type: 'changed', at: Date.now(), changes } satisfies SyncMessage);
     } catch {
       /* 閉じたチャンネル */
     }
   }, []);
+  notifyRef.current = notifyOtherTabs;
 
   /** 通知の記録を実データに合わせる。変化があったときだけ保存して設定を読み直す (同時に1つだけ実行) */
-  const noticeSync = useRef({ running: false, again: null as AppNotice[] | null });
+  const noticeSync = useRef({ running: false, again: null as AppNotice[] | null, lastSig: '' });
   const syncNotices = useCallback(
     async (notices: AppNotice[]) => {
       if (!service) return;
+      // 通知の内容 (id・件名・種類) が前回の記録から変わっていなければ、記録を読まない (保存のたびに大きな記録を読み書きしない。Phase 13R)
+      const sig = notices.map((n) => `${n.id}\u0001${n.title}\u0001${n.kind}`).join('\n');
+      if (sig === noticeSync.current.lastSig) return;
       if (noticeSync.current.running) {
         noticeSync.current.again = notices;
         return;
@@ -209,38 +265,46 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         let changed = false;
         while (next) {
           noticeSync.current.again = null;
-          changed = (await service.syncNotices(next).catch(() => false)) || changed;
+          const n: AppNotice[] = next;
+          const ok = await service.syncNotices(n).then(
+            (c) => {
+              changed = c || changed;
+              return true;
+            },
+            () => false,
+          );
+          if (ok) noticeSync.current.lastSig = n.map((x) => `${x.id}\u0001${x.title}\u0001${x.kind}`).join('\n');
           next = noticeSync.current.again;
         }
-        if (changed) {
-          const data = await service.loadSnapshot();
-          setState((s) => (s.status === 'ready' ? { ...s, data: { ...s.data, settings: data.settings } } : s));
-        }
+        if (changed) notifyOtherTabs(await refresh(service));
       } finally {
         noticeSync.current.running = false;
       }
     },
-    [service],
+    [service, refresh, notifyOtherTabs],
   );
   const markNoticesReadCb = useCallback(
     (ids: string[]) => {
       if (!service || !ids.length) return;
       void service.markNoticesRead(ids).then(async (changed) => {
-        if (!changed) return;
-        const data = await service.loadSnapshot();
-        setState((s) => (s.status === 'ready' ? { ...s, data: { ...s.data, settings: data.settings } } : s));
+        if (changed) notifyOtherTabs(await refresh(service));
       });
     },
-    [service],
+    [service, refresh, notifyOtherTabs],
   );
 
   const run = useCallback(
     async <T,>(action: (s: WorkCoreService) => Promise<T>, successMessage?: string | ((r: T) => string), opts?: RunOptions<T>): Promise<T> => {
       if (!service) throw new AppError('データの読み込み中です');
       try {
+        perfMark('wc:run:start');
         const result = await action(service);
-        notifyOtherTabs();
-        await reload();
+        perfMark('wc:run:written');
+        notifyOtherTabs(await refresh(service));
+        void runAuto(service);
+        perfMark('wc:run:loaded');
+        perfMeasure('wc:write', 'wc:run:start', 'wc:run:written');
+        perfMeasure('wc:load', 'wc:run:written', 'wc:run:loaded');
         if (successMessage) {
           const msg = typeof successMessage === 'function' ? successMessage(result) : successMessage;
           const undo = opts?.undo;
@@ -251,8 +315,11 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
                   label: '元に戻す',
                   onClick: () => {
                     undo(result)(service)
-                      .then(() => notifyOtherTabs())
-                      .then(reload)
+                      .then(() => refresh(service))
+                      .then((changes) => {
+                        notifyOtherTabs(changes);
+                        void runAuto(service);
+                      })
                       .then(() => toast.info(opts?.undoMessage ?? '元に戻しました'))
                       .catch((e) => toast.error(e instanceof AppError ? e.message : '元に戻せませんでした'));
                   },
@@ -269,11 +336,12 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         throw e instanceof AppError ? e : new AppError(message);
       }
     },
-    [service, reload, toast, notifyOtherTabs],
+    [service, refresh, runAuto, toast, notifyOtherTabs],
   );
 
   const value = useMemo<AppDataValue | null>(() => {
     if (state.status !== 'ready') return null;
+    perfMark('wc:derive:start');
     // 営業日の設定 (会社の休業日など) を、期限・営業日の計算より先に反映する (Phase 12)
     setBusinessCalendar(readBusinessCalendar(state.data.settings));
     const today = state.service.today();
@@ -283,7 +351,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     const proposals = pendingProposals(ALL_AUTOMATIONS, { data: state.data, today, stock }, (id) => ruleSetting(ALL_AUTOMATIONS.find((d) => d.id === id)!, settings).enabled);
     const notices = deriveNotices({ data: state.data, today, stock, proposals });
     const noticeState = readNoticeState(state.data);
-    return {
+    const value = {
       service: state.service,
       data: state.data,
       stats: computeDashboard(state.data, today),
@@ -302,6 +370,8 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       run,
       reload,
     };
+    perfMeasure('wc:derive', 'wc:derive:start');
+    return value;
   }, [state, run, reload, markNoticesReadCb]);
 
   // 日付をまたいだら「今日」(期限超過・今日のタスク・通知) を計算し直す。開いたままの端末でも翌朝に正しく表示する

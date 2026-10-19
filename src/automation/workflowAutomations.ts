@@ -7,6 +7,7 @@ import { buildOnboardingPlan } from './onboardingEngine';
 import { actionSignature, fingerprint, type AutomationAction, type AutomationDefinition, type AutomationProposal } from './engine';
 import { addDays, diffDays } from '../domain/date';
 import { toPreviousBusinessDayCal } from '../domain/calendar';
+import { hasTask } from './taskKeys';
 import type { DataSnapshot, ISODate } from '../domain/types';
 
 const JOSHIS = 'dept_joshis';
@@ -15,7 +16,6 @@ const JINJI = 'dept_jinji';
 function dept(data: DataSnapshot, preferred: string): string {
   return data.departments.some((d) => d.id === preferred) ? preferred : (data.departments[0]?.id ?? preferred);
 }
-const hasTask = (data: DataSnapshot, ruleKey: string) => data.tasks.some((t) => t.ruleId === ruleKey);
 
 // ---------------------------------------------------------------------------
 // 1. 新入社員 → 入社準備タスク (Phase 1 の入社準備ルールをそのまま使う)

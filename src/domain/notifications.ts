@@ -152,6 +152,9 @@ export interface NoticeInput {
 }
 
 /** 実データから通知を導出する (純粋関数) */
+/** 文字列の比較 (localeCompare と同じ順。比較のたびに作らず使い回すと速い) */
+const collator = new Intl.Collator();
+
 export function deriveNotices({ data, today, stock, proposals, infoDays = 7 }: NoticeInput): AppNotice[] {
   const out: AppNotice[] = [];
   /** 種類ごとの定義 (NOTICE_SPECS) からボタンの文言を補う */
@@ -348,16 +351,25 @@ export function deriveNotices({ data, today, stock, proposals, infoDays = 7 }: N
     });
   }
 
-  return out.sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || a.priority - b.priority || a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
+  return out.sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || a.priority - b.priority || collator.compare(a.at, b.at) || collator.compare(a.id, b.id));
 }
 
+type NavSummary = { count: number; worst: NoticeKind | null; items: AppNotice[] };
+/** 同じ通知の一覧に対する集計は1回だけ行う (メニューの項目ごとに全件を数え直さない。Phase 13R) */
+const summaryCache = new WeakMap<AppNotice[], Map<string, NavSummary>>();
+
 /** ナビ項目ごとの未処理件数と、最も重い種類 (バッジの色に使う) */
-export function navNoticeSummary(notices: AppNotice[], navKey: string): { count: number; worst: NoticeKind | null; items: AppNotice[] } {
+export function navNoticeSummary(notices: AppNotice[], navKey: string): NavSummary {
+  let cache = summaryCache.get(notices);
+  if (!cache) summaryCache.set(notices, (cache = new Map()));
+  const hit = cache.get(navKey);
+  if (hit) return hit;
   const mods = NAV_NOTICE_MODULES[navKey];
-  if (!mods) return { count: 0, worst: null, items: [] };
-  const items = notices.filter((n) => n.actionable && mods.includes(n.module));
+  const items = mods ? notices.filter((n) => n.actionable && mods.includes(n.module)) : [];
   const worst = items.reduce<NoticeKind | null>((w, n) => (w === null || KIND_ORDER[n.kind] < KIND_ORDER[w] ? n.kind : w), null);
-  return { count: items.length, worst, items };
+  const r = { count: items.length, worst, items };
+  cache.set(navKey, r);
+  return r;
 }
 
 // ---------------------------------------------------------------------------
